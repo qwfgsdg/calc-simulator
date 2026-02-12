@@ -1,14 +1,5 @@
-{
-  "name": "calc-simulator",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
-  },
-  "dependencies": {
-    "next": "^15",
-    "react": "^19",
-    "react-dom": "^19"
-  }
+"use client";
+import SimV4 from "./simulator-v4";
+export default function CalcPage() {
+  return <SimV4 />;
 }
