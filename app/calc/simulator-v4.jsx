@@ -187,7 +187,10 @@ export default function SimV4() {
     const totalPnL = parsed.reduce((a, p) => a + p.pnl, 0);
     const equity = wb + totalPnL;
     const totalMargin = parsed.reduce((a, p) => a + p.mg, 0);
-    const freeMargin = equity - totalMargin;
+    // Bybit 방식: 미실현 이익은 사용가능 마진에 반영하지 않음 (손실만 반영)
+    const lossOnlyPnL = parsed.reduce((a, p) => a + Math.min(p.pnl, 0), 0);
+    const availEquity = wb + lossOnlyPnL;
+    const freeMargin = availEquity - totalMargin;
 
     // ── Reverse-engineer maintenance margin from exchange liq price ──
     // At liqPrice, equity = MM_actual
@@ -279,13 +282,15 @@ export default function SimV4() {
           : newAvg - totalFee / newQty;
         const moveNeeded = pct(breakeven - newAvg, newAvg);
 
-        // Free margin after
+        // Free margin after (Bybit: 손실만 반영)
         const afterTotalMargin = totalMargin + addTotalMargin;
-        const afterEquity = wb + parsed.reduce((a, p) => {
-          if (p.id === sel.id) return a + sel.sign * (cp > 0 ? (cp - newAvg) * newQty : 0);
-          return a + p.pnl;
+        const afterLossPnL = parsed.reduce((a, p) => {
+          const pnl = p.id === sel.id
+            ? sel.sign * (cp > 0 ? (cp - newAvg) * newQty : 0)
+            : p.pnl;
+          return a + Math.min(pnl, 0);
         }, 0);
-        const afterFreeMargin = afterEquity - afterTotalMargin;
+        const afterFreeMargin = (wb + afterLossPnL) - afterTotalMargin;
 
         const isLong = sel.dir === "long";
         const liqWorse = exLiq > 0 && afterLiq != null &&
@@ -351,7 +356,14 @@ export default function SimV4() {
             const moveNeeded = pct(breakeven - newAvg, newAvg);
 
             const afterTotalMargin = totalMargin + addMargin;
-            const afterFreeMargin = equity - afterTotalMargin;
+            // Bybit 방식: 역산 후에도 손실만 반영
+            const revAfterLossPnL = parsed.reduce((a, p) => {
+              const pnl = p.id === sel.id
+                ? sel.sign * (cp > 0 ? (cp - newAvg) * newQty : 0)
+                : p.pnl;
+              return a + Math.min(pnl, 0);
+            }, 0);
+            const afterFreeMargin = (wb + revAfterLossPnL) - afterTotalMargin;
 
             const liqWorse = exLiq > 0 && afterLiq != null &&
               (isLong ? afterLiq > exLiq : afterLiq < exLiq);
@@ -379,19 +391,56 @@ export default function SimV4() {
       }
     }
 
-    // ── Solve price for target available amount ──
-    // available(P) = wb + P*A - B - totalMargin, where A = Σ(sign_i * qty_i), B = Σ(sign_i * ep_i * qty_i)
-    // P = (T + B + totalMargin - wb) / A
-    const sumA = parsed.reduce((a, p) => a + p.sign * p.qty, 0);
-    const sumB = parsed.reduce((a, p) => a + p.sign * p.ep * p.qty, 0);
+    // ── Solve price for target available amount (Bybit 방식: 이분법) ──
+    // Bybit에서 available(P) = wb + Σ min(pnl_i(P), 0) - totalMargin
+    // min() 클리핑으로 비선형이므로 이분법 탐색 사용
+
+    // 주어진 가격 P에서 Bybit 방식 freeMargin 계산
+    const calcFreeMarginAt = (P, posArr, extraMargin = 0) => {
+      const arr = posArr || parsed;
+      const tMg = arr.reduce((a, p) => a + p.mg, 0) + extraMargin;
+      const lossPnL = arr.reduce((a, p) => {
+        const pnl = p.sign * (P - p.ep) * p.qty;
+        return a + Math.min(pnl, 0);
+      }, 0);
+      return wb + lossPnL - tMg;
+    };
 
     const solvePriceForAvail = (target, posArr, extraMargin = 0) => {
-      const sA = posArr ? posArr.reduce((a, p) => a + p.sign * p.qty, 0) : sumA;
-      const sB = posArr ? posArr.reduce((a, p) => a + p.sign * p.ep * p.qty, 0) : sumB;
-      const tMg = (posArr ? posArr.reduce((a, p) => a + p.mg, 0) : totalMargin) + extraMargin;
-      if (Math.abs(sA) < 1e-12) return null;
-      const P = (target + sB + tMg - wb) / sA;
-      return P > 0 ? P : null;
+      if (!cp || cp <= 0) return null;
+      const cur = calcFreeMarginAt(cp, posArr, extraMargin);
+      if (cur >= target) return cp; // 이미 충분
+
+      // 양방향 포지션에서는 위/아래 어느 쪽으로 가도 available이 줄어들 수 있으므로
+      // 양쪽 모두 탐색하여 해가 있는 방향을 찾음
+      const bisect = (lo, hi) => {
+        const fLo = calcFreeMarginAt(lo, posArr, extraMargin);
+        const fHi = calcFreeMarginAt(hi, posArr, extraMargin);
+        if (fLo < target && fHi < target) return null; // 범위 내 해 없음
+        // fHi >= target 쪽으로 수렴
+        let a = lo, b = hi;
+        if (calcFreeMarginAt(a, posArr, extraMargin) >= target) {
+          // a 쪽이 이미 충분 — a에서 target 미만이 되는 지점을 찾아야 함 (반전)
+          [a, b] = [b, a];
+        }
+        // a: 부족, b: 충분
+        for (let i = 0; i < 80; i++) {
+          const mid = (a + b) / 2;
+          if (calcFreeMarginAt(mid, posArr, extraMargin) < target) a = mid;
+          else b = mid;
+        }
+        const result = (a + b) / 2;
+        return result > 0 ? result : null;
+      };
+
+      const upResult = bisect(cp, cp * 200);
+      const dnResult = bisect(0.001, cp);
+
+      // 둘 다 해가 있으면 현재가에 더 가까운 쪽 반환
+      if (upResult != null && dnResult != null) {
+        return Math.abs(upResult - cp) < Math.abs(dnResult - cp) ? upResult : dnResult;
+      }
+      return upResult != null ? upResult : dnResult;
     };
 
     // Target available calc
@@ -469,7 +518,12 @@ export default function SimV4() {
         const remTotalPnL = remParsed.reduce((a, p) => a + p.sign * (cp - p.ep) * p.qty, 0);
         const remEquity = newWallet + remTotalPnL;
         const remTotalMargin = remParsed.reduce((a, p) => a + p.mg, 0);
-        const remFreeMargin = remEquity - remTotalMargin;
+        // Bybit 방식: 손실만 반영
+        const remLossPnL = remParsed.reduce((a, p) => {
+          const pnl = p.sign * (cp - p.ep) * p.qty;
+          return a + Math.min(pnl, 0);
+        }, 0);
+        const remFreeMargin = (newWallet + remLossPnL) - remTotalMargin;
 
         // New liq price
         const remLiq = mmRate ? solveLiq(remParsed, mmRate) : null;
@@ -1096,7 +1150,8 @@ export default function SimV4() {
               <SumCard label="사용 마진" value={`${fmt(calc.totalMargin)} USDT`}
                 color="#94a3b8" />
               <SumCard label="사용 가능" value={`${fmt(calc.freeMargin)} USDT`}
-                color={calc.freeMargin > 0 ? "#34d399" : "#f87171"} />
+                color={calc.freeMargin > 0 ? "#34d399" : "#f87171"}
+                sub="미실현 이익 미반영 (Bybit)" />
             </div>
 
             {/* Available amount target */}
@@ -2361,11 +2416,12 @@ function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyr
   );
 }
 
-function SumCard({ label, value, color }) {
+function SumCard({ label, value, color, sub }) {
   return (
     <div style={S.sumCard}>
       <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 15, fontWeight: 700, color, fontFamily: "'IBM Plex Mono'" }}>{value}</div>
+      {sub && <div style={{ fontSize: 9, color: "#4b5563", marginTop: 3 }}>{sub}</div>}
     </div>
   );
 }
