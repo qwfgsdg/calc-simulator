@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 
 /* ═══════════════════════════════════════════
    UTILITIES
@@ -34,6 +34,14 @@ export default function SimV4() {
   const [feeRate, setFeeRate] = useState("0.04");
   const [exLiqPrice, setExLiqPrice] = useState("171.36");
 
+  // ── 실시간 가격 ──
+  const [priceCoin, setPriceCoin] = useState("ETH");
+  const [priceMode, setPriceMode] = useState("manual"); // "live" | "manual"
+  const [lastFetch, setLastFetch] = useState(null);
+  const [priceDir, setPriceDir] = useState(null); // "up" | "down" | null
+  const [fetchError, setFetchError] = useState(false);
+  const priceDirTimer = useRef(null);
+
   const [positions, setPositions] = useState([
     mkPos({ dir: "long", coin: "ETH", entryPrice: "3265.75707264", margin: "373.60", leverage: 50 }),
     mkPos({ dir: "short", coin: "ETH", entryPrice: "1952.15", margin: "188.28", leverage: 50 }),
@@ -62,6 +70,42 @@ export default function SimV4() {
   const [pyraSplitMode, setPyraSplitMode] = useState(false);
   const [pyraSplitTotal, setPyraSplitTotal] = useState("");
   const [pyraSplitPrices, setPyraSplitPrices] = useState(["", "", ""]);
+
+  // ── 실시간 가격 fetch ──
+  useEffect(() => {
+    if (priceMode !== "live") return;
+    const controller = new AbortController();
+
+    const fetchPrice = async () => {
+      try {
+        const res = await fetch(
+          `https://fapi.binance.com/fapi/v1/ticker/price?symbol=${priceCoin}USDT`,
+          { signal: controller.signal }
+        );
+        const data = await res.json();
+        const val = String(parseFloat(data.price));
+        setFetchError(false);
+        setCurPrice((prev) => {
+          if (val === prev) return prev;
+          const dir = prev && Number(val) > Number(prev) ? "up" : prev && Number(val) < Number(prev) ? "down" : null;
+          if (dir) {
+            setPriceDir(dir);
+            clearTimeout(priceDirTimer.current);
+            priceDirTimer.current = setTimeout(() => setPriceDir(null), 500);
+          }
+          return val;
+        });
+        setLastFetch(Date.now());
+      } catch (e) {
+        if (e.name === "AbortError") return;
+        setFetchError(true);
+      }
+    };
+
+    fetchPrice();
+    const interval = setInterval(fetchPrice, 5000);
+    return () => { controller.abort(); clearInterval(interval); };
+  }, [priceCoin, priceMode]);
 
   // Sync split helper from dcaEntries when opening
   const openSplitHelper = () => {
@@ -1109,9 +1153,74 @@ export default function SimV4() {
           <Fld label="지갑 총 잔고 (USDT)">
             <Inp value={wallet} onChange={setWallet} ph="9120.57" />
           </Fld>
-          <Fld label="현재가 ($)">
-            <Inp value={curPrice} onChange={setCurPrice} ph="코인 현재 가격" />
-          </Fld>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, fontFamily: "'DM Sans'" }}>
+              현재가 ($) — {priceCoin}/USDT
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <select value={priceCoin} onChange={(e) => {
+                setPriceCoin(e.target.value);
+                setPriceMode("live");
+                setFetchError(false);
+              }} style={{ ...S.sel, width: 76, flex: "none" }}>
+                {COINS.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <input
+                type="number"
+                value={curPrice}
+                placeholder="코인 현재 가격"
+                readOnly={priceMode === "live"}
+                onChange={(e) => setCurPrice(e.target.value)}
+                onFocus={(e) => { if (priceMode === "manual") e.target.style.borderColor = "#0ea5e9"; }}
+                onBlur={(e) => { e.target.style.borderColor = priceMode === "live" ? "#34d39944" : "#1e1e2e"; }}
+                style={{
+                  ...S.inp,
+                  flex: 1,
+                  color: priceDir === "up" ? "#34d399" : priceDir === "down" ? "#f87171" : "#e2e8f0",
+                  borderColor: priceMode === "live" ? "#34d39944" : "#1e1e2e",
+                  background: priceMode === "live" ? "#060d08" : "#0a0a12",
+                  cursor: priceMode === "live" ? "default" : "text",
+                  transition: "color 0.3s, border-color 0.3s, background 0.3s",
+                }}
+              />
+              <button onClick={() => {
+                if (priceMode === "live") {
+                  setPriceMode("manual");
+                } else {
+                  setPriceMode("live");
+                  setFetchError(false);
+                }
+              }} style={{
+                ...S.miniBtn,
+                width: 36, flex: "none", fontSize: 14,
+                color: priceMode === "live" ? "#34d399" : "#6b7280",
+                borderColor: priceMode === "live" ? "#34d39933" : "#1e1e2e",
+                background: priceMode === "live" ? "#34d39908" : "transparent",
+              }}
+                title={priceMode === "live" ? "수동 입력으로 전환" : "실시간으로 전환"}
+              >
+                {priceMode === "live" ? "✎" : "↻"}
+              </button>
+            </div>
+            <div style={{ fontSize: 9, marginTop: 3, color: "#4b5563", fontFamily: "'DM Sans'" }}>
+              {fetchError ? (
+                <span style={{ color: "#f87171" }}>연결 실패 · 수동 입력 모드</span>
+              ) : priceMode === "live" ? (
+                <span style={{ color: "#34d399", display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{
+                    display: "inline-block", width: 4, height: 4, borderRadius: "50%",
+                    background: "#34d399", boxShadow: "0 0 6px #34d39966",
+                  }} />
+                  Binance Futures 실시간
+                </span>
+              ) : (
+                <span>수동 입력 중 · <span
+                  onClick={() => { setPriceMode("live"); setFetchError(false); }}
+                  style={{ color: "#0ea5e9", cursor: "pointer", textDecoration: "underline" }}
+                >실시간 전환</span></span>
+              )}
+            </div>
+          </div>
         </div>
         <div style={{ ...S.grid2, marginTop: 8 }}>
           <Fld label="거래소 강제 청산가 ($)">
