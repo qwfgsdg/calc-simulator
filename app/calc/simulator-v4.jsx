@@ -110,7 +110,19 @@ export default function SimV4() {
   const [pyraSplitTotal, setPyraSplitTotal] = useState("");
   const [pyraSplitPrices, setPyraSplitPrices] = useState(["", "", ""]);
 
-  // ── 자동 저장 ──
+  // ── 헷지 사이클 전략 ──
+  const [appTab, setAppTab] = useState("sim"); // "sim" | "hedge"
+  const [hcMargin, setHcMargin] = useState("1000");         // 한쪽 기본 마진
+  const [hcLeverage, setHcLeverage] = useState("100");       // 레버리지
+  const [hcTakeROE, setHcTakeROE] = useState("40");          // 익절 ROE %
+  const [hcCutRatio, setHcCutRatio] = useState("50");        // 손절 비율 %
+  const [hcRecoveryROE, setHcRecoveryROE] = useState("0");   // 복구 ROE %
+  const [hcKillPct, setHcKillPct] = useState("15");          // 킬 스위치 %
+  const [hcLongEntry, setHcLongEntry] = useState("");        // 롱 진입가
+  const [hcShortEntry, setHcShortEntry] = useState("");      // 숏 진입가
+  const [hcLongMargin, setHcLongMargin] = useState("");      // 롱 현재 마진
+  const [hcShortMargin, setHcShortMargin] = useState("");    // 숏 현재 마진
+  const [hcCycles, setHcCycles] = useState([]);              // 사이클 히스토리
   const [saveStatus, setSaveStatus] = useState(null); // "saved" | "saving" | null
   const [dataLoaded, setDataLoaded] = useState(false);
   const saveTimer = useRef(null);
@@ -127,6 +139,18 @@ export default function SimV4() {
         if (data.positions && data.positions.length > 0) {
           setPositions(data.positions.map((p) => ({ ...mkPos(), ...p, id: p.id || uid() })));
         }
+        // 헷지 사이클
+        if (data.hcMargin != null) setHcMargin(data.hcMargin);
+        if (data.hcLeverage != null) setHcLeverage(data.hcLeverage);
+        if (data.hcTakeROE != null) setHcTakeROE(data.hcTakeROE);
+        if (data.hcCutRatio != null) setHcCutRatio(data.hcCutRatio);
+        if (data.hcRecoveryROE != null) setHcRecoveryROE(data.hcRecoveryROE);
+        if (data.hcKillPct != null) setHcKillPct(data.hcKillPct);
+        if (data.hcLongEntry != null) setHcLongEntry(data.hcLongEntry);
+        if (data.hcShortEntry != null) setHcShortEntry(data.hcShortEntry);
+        if (data.hcLongMargin != null) setHcLongMargin(data.hcLongMargin);
+        if (data.hcShortMargin != null) setHcShortMargin(data.hcShortMargin);
+        if (data.hcCycles) setHcCycles(data.hcCycles);
       }
       setDataLoaded(true);
     })();
@@ -134,7 +158,7 @@ export default function SimV4() {
 
   // A등급 데이터 변경 시 1초 debounce 자동 저장
   useEffect(() => {
-    if (!dataLoaded) return; // 로드 완료 전에는 저장하지 않음
+    if (!dataLoaded) return;
     clearTimeout(saveTimer.current);
     setSaveStatus("saving");
     saveTimer.current = setTimeout(async () => {
@@ -144,11 +168,15 @@ export default function SimV4() {
           id: p.id, dir: p.dir, coin: p.coin,
           entryPrice: p.entryPrice, margin: p.margin, leverage: p.leverage,
         })),
+        hcMargin, hcLeverage, hcTakeROE, hcCutRatio, hcRecoveryROE, hcKillPct,
+        hcLongEntry, hcShortEntry, hcLongMargin, hcShortMargin, hcCycles,
       };
       const ok = await storageAdapter.save(STORAGE_KEY, data);
       setSaveStatus(ok ? "saved" : null);
     }, 1000);
-  }, [wallet, feeRate, exLiqPrice, priceCoin, positions, dataLoaded]);
+  }, [wallet, feeRate, exLiqPrice, priceCoin, positions, dataLoaded,
+      hcMargin, hcLeverage, hcTakeROE, hcCutRatio, hcRecoveryROE, hcKillPct,
+      hcLongEntry, hcShortEntry, hcLongMargin, hcShortMargin, hcCycles]);
 
   const handleReset = async () => {
     if (!confirm("모든 저장 데이터를 삭제하고 초기값으로 복원할까요?")) return;
@@ -1218,6 +1246,237 @@ export default function SimV4() {
   const selPos = positions.find((p) => p.id === selId);
 
   /* ═══════════════════════════════════════════
+     HEDGE CYCLE CALC
+     ═══════════════════════════════════════════ */
+  const hcCalc = useMemo(() => {
+    const cp = n(curPrice);
+    const wb = n(wallet);
+    const baseMg = n(hcMargin);
+    const lev = n(hcLeverage);
+    const takeROE = n(hcTakeROE);
+    const cutRatio = n(hcCutRatio) / 100;
+    const recovROE = n(hcRecoveryROE);
+    const killPct = n(hcKillPct) / 100;
+    const fee = n(feeRate) / 100;
+
+    const longEp = n(hcLongEntry);
+    const shortEp = n(hcShortEntry);
+    const longMg = n(hcLongMargin) || baseMg;
+    const shortMg = n(hcShortMargin) || baseMg;
+
+    if (!cp || !wb || !baseMg || !lev) return null;
+
+    // 포지션 계산
+    const longNotional = longMg * lev;
+    const shortNotional = shortMg * lev;
+    const longQty = longEp > 0 ? longNotional / longEp : 0;
+    const shortQty = shortEp > 0 ? shortNotional / shortEp : 0;
+
+    // ROE = (미실현손익 / 전략마진) × 100
+    const longPnL = longQty > 0 ? (cp - longEp) * longQty : 0;
+    const shortPnL = shortQty > 0 ? (shortEp - cp) * shortQty : 0;
+    const longROE = baseMg > 0 ? (longPnL / baseMg) * 100 : 0;
+    const shortROE = baseMg > 0 ? (shortPnL / baseMg) * 100 : 0;
+
+    // 밸런스 비율
+    const ratio = longMg > 0 && shortMg > 0 ? Math.max(longMg, shortMg) / Math.min(longMg, shortMg) : 0;
+    const isBalanced = Math.abs(longMg - shortMg) < baseMg * 0.1; // 10% 이내면 balanced
+
+    // 상태 판별
+    let state = 1; // 기본 Balanced
+    let winner = null; // "long" | "short"
+    let loser = null;
+    let winnerROE = 0, loserROE = 0;
+
+    if (!isBalanced) {
+      // 2:1 비율 — Imbalanced
+      state = 2;
+      if (longMg > shortMg) {
+        winner = "long"; loser = "short";
+        winnerROE = longROE; loserROE = shortROE;
+      } else {
+        winner = "short"; loser = "long";
+        winnerROE = shortROE; loserROE = longROE;
+      }
+      // 복구 조건 체크: loser가 recovROE 이상이면 state 3
+      if (loserROE >= recovROE) {
+        state = 3;
+      }
+    } else {
+      // Balanced — winner/loser 판별
+      if (longROE > shortROE) {
+        winner = "long"; loser = "short";
+      } else {
+        winner = "short"; loser = "long";
+      }
+      winnerROE = winner === "long" ? longROE : shortROE;
+      loserROE = loser === "long" ? longROE : shortROE;
+    }
+
+    // 트리거 가격 역산
+    // ROE = ((CP - EP) * qty / baseMg) * 100 = takeROE
+    // for long: CP = EP + (takeROE/100 * baseMg / qty)
+    // for short: CP = EP - (takeROE/100 * baseMg / qty)
+    let longTriggerPrice = null, shortTriggerPrice = null;
+    if (longQty > 0) longTriggerPrice = longEp + (takeROE / 100 * baseMg) / longQty;
+    if (shortQty > 0) shortTriggerPrice = shortEp - (takeROE / 100 * baseMg) / shortQty;
+
+    // 복구 가격 역산 (loser의 ROE가 recovROE가 되는 가격)
+    let recoveryPrice = null;
+    if (state === 2 && loser) {
+      const loserEp = loser === "long" ? longEp : shortEp;
+      const loserQty = loser === "long" ? longQty : shortQty;
+      const loserMgNow = loser === "long" ? longMg : shortMg;
+      if (loserQty > 0) {
+        if (loser === "long") {
+          recoveryPrice = loserEp + (recovROE / 100 * baseMg) / loserQty;
+        } else {
+          recoveryPrice = loserEp - (recovROE / 100 * baseMg) / loserQty;
+        }
+      }
+    }
+
+    // 프로그레스: winner ROE / takeROE
+    const winnerProgress = takeROE > 0 ? Math.min(Math.max(winnerROE / takeROE, 0), 1) : 0;
+
+    // 복구 프로그레스
+    let recoveryProgress = 0;
+    if (state === 2 && loserROE < recovROE) {
+      // loser가 심한 마이너스에서 0%까지 올라와야 함
+      const loserBasePnL = loser === "long" ? longPnL : shortPnL;
+      const loserTargetPnL = recovROE / 100 * baseMg;
+      const range = Math.abs(loserTargetPnL - loserBasePnL);
+      recoveryProgress = range > 0 ? Math.min(1 - Math.abs(loserBasePnL - loserTargetPnL) / (Math.abs(loserBasePnL) + Math.abs(loserTargetPnL) + 0.01), 1) : 1;
+    }
+
+    // 킬 스위치
+    const killThreshold = wb * (1 - killPct);
+    const totalPnL = longPnL + shortPnL;
+    const equity = wb + totalPnL;
+    const equityPct = wb > 0 ? (equity / wb) * 100 : 100;
+    const killAlert = equity <= killThreshold;
+
+    // 상태별 액션 + 손익 시뮬레이션
+    let actions = [];
+    let cycleProfit = null;
+
+    const buildCycleProfit = (wROE, lROE, wSide, lSide) => {
+      const wPnL = wSide === "long" ? longPnL : shortPnL;
+      const wQty = wSide === "long" ? longQty : shortQty;
+      const wNotional = wSide === "long" ? longNotional : shortNotional;
+      const lPnL = lSide === "long" ? longPnL : shortPnL;
+      const lQty = lSide === "long" ? longQty : shortQty;
+      const lNotional = lSide === "long" ? longNotional : shortNotional;
+      const lMg = lSide === "long" ? longMg : shortMg;
+
+      const winCloseFee = wQty * cp * fee;
+      const reentryNotional = baseMg * lev;
+      const reentryFee = reentryNotional * fee;
+      const loserCutPnL = lPnL * cutRatio; // 음수
+      const loserCutFee = lQty * cutRatio * cp * fee;
+
+      const netProfit = wPnL - winCloseFee - reentryFee + loserCutPnL - loserCutFee;
+      const totalVolume = wNotional + reentryNotional + lNotional * cutRatio;
+
+      return {
+        winProfit: wPnL, winCloseFee, reentryFee,
+        loserCutPnL, loserCutFee, netProfit, totalVolume,
+        loserRemainMg: lMg * (1 - cutRatio),
+      };
+    };
+
+    // State 1: winner가 takeROE 도달
+    if (state === 1 && winnerROE >= takeROE) {
+      cycleProfit = buildCycleProfit(winnerROE, loserROE, winner, loser);
+      actions = [
+        { label: `${winner === "long" ? "롱" : "숏"} 전량 익절`, detail: `수익 +${fmt(cycleProfit.winProfit)} (수수료 -${fmt(cycleProfit.winCloseFee)})`, type: "profit" },
+        { label: `${winner === "long" ? "롱" : "숏"} ${fmt(baseMg, 0)} USDT 재진입`, detail: `수수료 -${fmt(cycleProfit.reentryFee)}`, type: "entry" },
+        { label: `${loser === "long" ? "롱" : "숏"} ${n(hcCutRatio)}% 손절`, detail: `손실 ${fmt(cycleProfit.loserCutPnL)} (수수료 -${fmt(cycleProfit.loserCutFee)})`, type: "loss" },
+      ];
+    }
+    // State 2: winner가 또 takeROE 도달 (원웨이 시나리오 B)
+    else if (state === 2 && winnerROE >= takeROE) {
+      cycleProfit = buildCycleProfit(winnerROE, loserROE, winner, loser);
+      actions = [
+        { label: `${winner === "long" ? "롱" : "숏"} 전량 익절`, detail: `수익 +${fmt(cycleProfit.winProfit)} (수수료 -${fmt(cycleProfit.winCloseFee)})`, type: "profit" },
+        { label: `${winner === "long" ? "롱" : "숏"} ${fmt(baseMg, 0)} USDT 재진입`, detail: `수수료 -${fmt(cycleProfit.reentryFee)}`, type: "entry" },
+        { label: `${loser === "long" ? "롱" : "숏"} 잔여 ${n(hcCutRatio)}% 추가 손절`, detail: `손실 ${fmt(cycleProfit.loserCutPnL)} → 잔여 ${fmt(cycleProfit.loserRemainMg, 0)}`, type: "loss" },
+      ];
+    }
+    // State 3: loser 복구
+    else if (state === 3) {
+      const fillAmount = baseMg - (loser === "long" ? longMg : shortMg);
+      const fillFee = fillAmount * lev * fee;
+      actions = [
+        { label: `${loser === "long" ? "롱" : "숏"} ${fmt(fillAmount, 0)} USDT 추가 진입`, detail: `마진 ${fmt(baseMg, 0)}으로 복구 (수수료 -${fmt(fillFee)})`, type: "recovery" },
+      ];
+    }
+
+    // 알림 가격 배열
+    const alertPrices = [];
+    if (longTriggerPrice && longTriggerPrice > 0) {
+      alertPrices.push({ label: "롱 익절 트리거", price: longTriggerPrice, color: "#34d399" });
+    }
+    if (shortTriggerPrice && shortTriggerPrice > 0) {
+      alertPrices.push({ label: "숏 익절 트리거", price: shortTriggerPrice, color: "#f87171" });
+    }
+    if (recoveryPrice && recoveryPrice > 0) {
+      alertPrices.push({ label: `${loser === "long" ? "롱" : "숏"} 복구 (본전)`, price: recoveryPrice, color: "#0ea5e9" });
+    }
+
+    // 킬 스위치 근접 가격 역산
+    // equity(P) = wb + longQty*(P-longEp) + shortQty*(shortEp-P)
+    // = wb + P*(longQty-shortQty) - longQty*longEp + shortQty*shortEp
+    // killThreshold = wb + P*(longQty-shortQty) - longQty*longEp + shortQty*shortEp
+    let killPrice = null;
+    if (longQty > 0 && shortQty > 0) {
+      const netQty = longQty - shortQty;
+      const constPart = wb - longQty * longEp + shortQty * shortEp;
+      if (Math.abs(netQty) > 1e-12) {
+        const kp = (killThreshold - constPart) / netQty;
+        if (kp > 0) killPrice = kp;
+      }
+    }
+    if (killPrice && killPrice > 0) {
+      alertPrices.push({ label: "⚠ 킬 스위치", price: killPrice, color: "#f87171" });
+    }
+
+    // 원웨이 시나리오 (연속 +40% 시 loser 축소 경로)
+    const onewayScenario = [];
+    if (longEp > 0 && shortEp > 0 && baseMg > 0) {
+      let simLoserMg = isBalanced ? baseMg : Math.min(longMg, shortMg);
+      let simCumProfit = 0;
+      let simCumVolume = 0;
+      for (let i = 0; i < 6 && simLoserMg > 1; i++) {
+        const profit = takeROE / 100 * baseMg;
+        const loss = (simLoserMg * cutRatio) * (takeROE / 100); // approximate loss
+        simCumProfit += profit - loss;
+        simCumVolume += baseMg * lev * 2 + simLoserMg * cutRatio * lev;
+        simLoserMg = simLoserMg * (1 - cutRatio);
+        onewayScenario.push({
+          cycle: i + 1, loserMg: simLoserMg,
+          cumProfit: simCumProfit, cumVolume: simCumVolume,
+        });
+      }
+    }
+
+    return {
+      state, winner, loser,
+      longPnL, shortPnL, longROE, shortROE,
+      longMg, shortMg, longEp, shortEp,
+      longQty, shortQty, longNotional, shortNotional,
+      winnerROE, loserROE, winnerProgress,
+      longTriggerPrice, shortTriggerPrice, recoveryPrice,
+      recoveryProgress,
+      actions, cycleProfit, alertPrices, killPrice,
+      killThreshold, equity, equityPct, killAlert, totalPnL,
+      isBalanced, ratio, onewayScenario,
+      baseMg, lev, takeROE, cutRatio, recovROE, fee,
+    };
+  }, [curPrice, wallet, feeRate, hcMargin, hcLeverage, hcTakeROE, hcCutRatio, hcRecoveryROE, hcKillPct,
+      hcLongEntry, hcShortEntry, hcLongMargin, hcShortMargin]);
+
+  /* ═══════════════════════════════════════════
      RENDER
      ═══════════════════════════════════════════ */
   return (
@@ -1262,6 +1521,26 @@ export default function SimV4() {
             </div>
           </div>
         </header>
+
+        {/* TAB NAVIGATION */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+          {[
+            { id: "sim", label: "물타기 · 불타기" },
+            { id: "hedge", label: "헷지 사이클" },
+          ].map((tab) => (
+            <button key={tab.id} onClick={() => setAppTab(tab.id)} style={{
+              flex: 1, padding: "12px 0", fontSize: 13, fontWeight: 700, borderRadius: 10,
+              border: `1px solid ${appTab === tab.id ? "#0ea5e944" : "#1e1e2e"}`,
+              background: appTab === tab.id ? "#0ea5e910" : "transparent",
+              color: appTab === tab.id ? "#0ea5e9" : "#4b5563",
+              cursor: "pointer", fontFamily: "'DM Sans'", transition: "all 0.15s",
+              letterSpacing: 0.5,
+            }}>{tab.label}</button>
+          ))}
+        </div>
+
+        {/* ══════ SIMULATOR TAB ══════ */}
+        {appTab === "sim" && (<>
 
         {/* ① ACCOUNT & MARKET */}
         <Sec label="계좌 & 시장" />
@@ -2301,6 +2580,448 @@ export default function SimV4() {
         <div style={S.footer}>
           교차 마진 · 거래소 청산가 기반 추정 · 수수료 왕복 · 펀딩비 미반영
         </div>
+
+        </>)}
+
+        {/* ══════ HEDGE CYCLE TAB ══════ */}
+        {appTab === "hedge" && (<>
+
+          {/* HC ① 계좌 & 시장 (공유) */}
+          <Sec label="계좌 & 시장" />
+          <div style={S.grid2}>
+            <Fld label="지갑 총 잔고 (USDT)">
+              <Inp value={wallet} onChange={setWallet} ph="10000" />
+            </Fld>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, fontFamily: "'DM Sans'" }}>
+                현재가 ($) — {priceCoin}/USDT
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <select value={priceCoin} onChange={(e) => { setPriceCoin(e.target.value); setPriceMode("live"); setFetchError(false); }}
+                  style={{ ...S.sel, width: 76, flex: "none" }}>
+                  {COINS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <input type="number" value={curPrice} placeholder="현재 가격"
+                  readOnly={priceMode === "live"} onChange={(e) => setCurPrice(e.target.value)}
+                  style={{ ...S.inp, flex: 1, borderColor: priceMode === "live" ? "#34d39944" : "#1e1e2e",
+                    color: priceDir === "up" ? "#34d399" : priceDir === "down" ? "#f87171" : "#e2e8f0",
+                    background: priceMode === "live" ? "#060d08" : "#0a0a12",
+                    cursor: priceMode === "live" ? "default" : "text", transition: "color 0.3s" }} />
+                <button onClick={() => { priceMode === "live" ? setPriceMode("manual") : (setPriceMode("live"), setFetchError(false)); }}
+                  style={{ ...S.miniBtn, width: 36, flex: "none", fontSize: 14,
+                    color: priceMode === "live" ? "#34d399" : "#6b7280",
+                    borderColor: priceMode === "live" ? "#34d39933" : "#1e1e2e" }}
+                  title={priceMode === "live" ? "수동 입력" : "실시간"}>
+                  {priceMode === "live" ? "✎" : "↻"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* HC ② 전략 파라미터 */}
+          <Sec label="전략 파라미터" />
+          <div style={S.grid3}>
+            <Fld label="기본 마진 (USDT)">
+              <Inp value={hcMargin} onChange={setHcMargin} ph="1000" />
+            </Fld>
+            <Fld label="레버리지">
+              <Inp value={hcLeverage} onChange={setHcLeverage} ph="100" />
+            </Fld>
+            <Fld label="익절 ROE (%)">
+              <Inp value={hcTakeROE} onChange={setHcTakeROE} ph="40" />
+            </Fld>
+          </div>
+          <div style={{ ...S.grid3, marginTop: 8 }}>
+            <Fld label="손절 비율 (%)">
+              <Inp value={hcCutRatio} onChange={setHcCutRatio} ph="50" />
+            </Fld>
+            <Fld label="복구 ROE (%)">
+              <Inp value={hcRecoveryROE} onChange={setHcRecoveryROE} ph="0" />
+            </Fld>
+            <Fld label="킬 스위치 (%)">
+              <Inp value={hcKillPct} onChange={setHcKillPct} ph="15" />
+            </Fld>
+            <Fld label="수수료율 (%)">
+              <Inp value={feeRate} onChange={setFeeRate} ph="0.04" />
+            </Fld>
+          </div>
+
+          {/* HC ③ 현재 포지션 입력 */}
+          <Sec label="현재 포지션" />
+          <div style={S.grid2}>
+            <div style={{ ...S.card, borderColor: "#34d39933", background: "#060d08" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#34d399", marginBottom: 8, fontFamily: "'DM Sans'" }}>LONG</div>
+              <Fld label="진입가 ($)">
+                <Inp value={hcLongEntry} onChange={setHcLongEntry} ph="진입 평단가" />
+              </Fld>
+              <div style={{ marginTop: 6 }}>
+                <Fld label="현재 마진 (USDT)">
+                  <Inp value={hcLongMargin} onChange={setHcLongMargin} ph={hcMargin || "1000"} />
+                </Fld>
+              </div>
+              {hcCalc && n(hcLongEntry) > 0 && (
+                <div style={{ marginTop: 8, fontSize: 12, color: hcCalc.longROE >= 0 ? "#34d399" : "#f87171", fontWeight: 600 }}>
+                  PnL: {fmtS(hcCalc.longPnL)} ({fmtS(hcCalc.longROE)}%)
+                </div>
+              )}
+            </div>
+            <div style={{ ...S.card, borderColor: "#f8717133", background: "#0d0608" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#f87171", marginBottom: 8, fontFamily: "'DM Sans'" }}>SHORT</div>
+              <Fld label="진입가 ($)">
+                <Inp value={hcShortEntry} onChange={setHcShortEntry} ph="진입 평단가" />
+              </Fld>
+              <div style={{ marginTop: 6 }}>
+                <Fld label="현재 마진 (USDT)">
+                  <Inp value={hcShortMargin} onChange={setHcShortMargin} ph={hcMargin || "1000"} />
+                </Fld>
+              </div>
+              {hcCalc && n(hcShortEntry) > 0 && (
+                <div style={{ marginTop: 8, fontSize: 12, color: hcCalc.shortROE >= 0 ? "#34d399" : "#f87171", fontWeight: 600 }}>
+                  PnL: {fmtS(hcCalc.shortPnL)} ({fmtS(hcCalc.shortROE)}%)
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* HC ④ 상태 대시보드 */}
+          {hcCalc && n(curPrice) > 0 && (<>
+            <Sec label="상태 대시보드" />
+
+            {/* 현재 상태 표시 */}
+            <div style={{
+              padding: 20, borderRadius: 12, textAlign: "center", marginBottom: 12,
+              background: hcCalc.state === 1 ? "#34d39908" : hcCalc.state === 3 ? "#0ea5e908" : "#f59e0b08",
+              border: `1px solid ${hcCalc.state === 1 ? "#34d39933" : hcCalc.state === 3 ? "#0ea5e933" : "#f59e0b33"}`,
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "'DM Sans'", marginBottom: 6,
+                color: hcCalc.state === 1 ? "#34d399" : hcCalc.state === 3 ? "#0ea5e9" : "#f59e0b" }}>
+                {hcCalc.state === 1 ? "🟢 상태 1 — Balanced (1:1)" :
+                 hcCalc.state === 3 ? "🔵 상태 3 — Recovery 가능" :
+                 "🟡 상태 2 — Imbalanced"}
+              </div>
+              <div style={{ fontSize: 11, color: "#6b7280" }}>
+                롱 {fmt(hcCalc.longMg, 0)} : 숏 {fmt(hcCalc.shortMg, 0)}
+                {!hcCalc.isBalanced && ` (${fmt(hcCalc.ratio, 1)}:1)`}
+              </div>
+            </div>
+
+            {/* 트리거 프로그레스 */}
+            {hcCalc.state === 1 && (
+              <div style={{ ...S.card, borderColor: "#1e1e2e" }}>
+                <div style={{ fontSize: 10, color: "#6b7280", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+                  익절 트리거 대기
+                </div>
+                {hcCalc.winner && (
+                  <>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
+                      <span style={{ color: "#94a3b8" }}>
+                        {hcCalc.winner === "long" ? "롱" : "숏"} ROE: {fmtS(hcCalc.winnerROE)}%
+                      </span>
+                      <span style={{ color: "#0ea5e9" }}>목표: +{hcCalc.takeROE}%</span>
+                    </div>
+                    <div style={{ height: 8, background: "#1e1e2e", borderRadius: 4, overflow: "hidden" }}>
+                      <div style={{
+                        height: "100%", borderRadius: 4, transition: "width 0.3s",
+                        width: `${Math.max(hcCalc.winnerProgress * 100, 0)}%`,
+                        background: hcCalc.winnerProgress >= 1 ? "#34d399" : "linear-gradient(90deg, #0ea5e9, #34d399)",
+                      }} />
+                    </div>
+                    <div style={{ fontSize: 11, color: "#4b5563", marginTop: 6 }}>
+                      {hcCalc.winnerProgress >= 1 ? (
+                        <span style={{ color: "#34d399", fontWeight: 600 }}>🚨 트리거 도달! 아래 액션을 실행하세요</span>
+                      ) : (
+                        <>
+                          트리거 가격: <span style={{ color: "#e2e8f0" }}>
+                            ${fmt(hcCalc.winner === "long" ? hcCalc.longTriggerPrice : hcCalc.shortTriggerPrice)}
+                          </span>
+                          <span style={{ color: "#4b5563", marginLeft: 6 }}>
+                            ({fmtS(((hcCalc.winner === "long" ? hcCalc.longTriggerPrice : hcCalc.shortTriggerPrice) - n(curPrice)) / n(curPrice) * 100)}%)
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* 복구 프로그레스 (state 2) */}
+            {hcCalc.state === 2 && hcCalc.recoveryPrice && (
+              <div style={{ ...S.card, borderColor: "#f59e0b33" }}>
+                <div style={{ fontSize: 10, color: "#f59e0b", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+                  복구 대기 — {hcCalc.loser === "long" ? "롱" : "숏"} 본전 복귀 중
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
+                  <span style={{ color: "#94a3b8" }}>
+                    {hcCalc.loser === "long" ? "롱" : "숏"} ROE: {fmtS(hcCalc.loserROE)}%
+                  </span>
+                  <span style={{ color: "#0ea5e9" }}>목표: {hcCalc.recovROE}%</span>
+                </div>
+                <div style={{ fontSize: 11, color: "#4b5563", marginTop: 6 }}>
+                  복구 가격: <span style={{ color: "#e2e8f0" }}>${fmt(hcCalc.recoveryPrice)}</span>
+                  <span style={{ color: "#4b5563", marginLeft: 6 }}>
+                    ({fmtS(((hcCalc.recoveryPrice) - n(curPrice)) / n(curPrice) * 100)}%)
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* 액션 체크리스트 */}
+            {hcCalc.actions.length > 0 && (
+              <div style={{ ...S.card, borderColor: hcCalc.state === 3 ? "#0ea5e933" : "#34d39933" }}>
+                <div style={{ fontSize: 10, color: hcCalc.state === 3 ? "#0ea5e9" : "#34d399", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+                  {hcCalc.state === 3 ? "복구 액션" : "실행할 액션"}
+                </div>
+                {hcCalc.actions.map((act, i) => (
+                  <div key={i} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "10px 12px", marginBottom: 4, borderRadius: 8,
+                    background: act.type === "profit" ? "#34d39908" : act.type === "loss" ? "#f8717108" : act.type === "recovery" ? "#0ea5e908" : "#0a0a14",
+                    border: `1px solid ${act.type === "profit" ? "#34d39922" : act.type === "loss" ? "#f8717122" : act.type === "recovery" ? "#0ea5e922" : "#1e1e2e"}`,
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 12, color: "#e2e8f0", fontWeight: 500 }}>{act.label}</div>
+                      <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>{act.detail}</div>
+                    </div>
+                    <div style={{
+                      fontSize: 11, fontWeight: 600,
+                      color: act.type === "profit" ? "#34d399" : act.type === "loss" ? "#f87171" : "#0ea5e9",
+                    }}>
+                      {act.type === "profit" ? "익절" : act.type === "loss" ? "손절" : act.type === "entry" ? "진입" : "복구"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 손익 시뮬레이션 테이블 */}
+            {hcCalc.cycleProfit && (
+              <div style={{ ...S.card, borderColor: "#0ea5e922" }}>
+                <div style={{ fontSize: 10, color: "#0ea5e9", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+                  사이클 실행 시 예상 손익
+                </div>
+                {[
+                  { label: `${hcCalc.winner === "long" ? "롱" : "숏"} 익절 수익`, value: hcCalc.cycleProfit.winProfit, color: "#34d399", prefix: "+" },
+                  { label: "  └ 청산 수수료", value: -hcCalc.cycleProfit.winCloseFee, color: "#f87171", prefix: "" },
+                  { label: `${hcCalc.winner === "long" ? "롱" : "숏"} 재진입 수수료`, value: -hcCalc.cycleProfit.reentryFee, color: "#f87171", prefix: "" },
+                  { label: `${hcCalc.loser === "long" ? "롱" : "숏"} ${n(hcCutRatio)}% 손절`, value: hcCalc.cycleProfit.loserCutPnL, color: "#f87171", prefix: "" },
+                  { label: "  └ 청산 수수료", value: -hcCalc.cycleProfit.loserCutFee, color: "#f87171", prefix: "" },
+                ].map((row, i) => (
+                  <div key={i} style={{
+                    display: "flex", justifyContent: "space-between", padding: "4px 0",
+                    borderBottom: i < 4 ? "1px solid #0e0e18" : "none", fontSize: 12,
+                  }}>
+                    <span style={{ color: "#94a3b8" }}>{row.label}</span>
+                    <span style={{ color: row.color, fontWeight: 500 }}>
+                      {row.prefix}{fmt(row.value)} USDT
+                    </span>
+                  </div>
+                ))}
+                <div style={{
+                  display: "flex", justifyContent: "space-between", padding: "8px 0 4px",
+                  borderTop: "1px solid #1e1e2e", marginTop: 4, fontSize: 13, fontWeight: 700,
+                }}>
+                  <span style={{ color: "#e2e8f0" }}>순수익</span>
+                  <span style={{ color: hcCalc.cycleProfit.netProfit >= 0 ? "#34d399" : "#f87171" }}>
+                    {fmtS(hcCalc.cycleProfit.netProfit)} USDT
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11 }}>
+                  <span style={{ color: "#4b5563" }}>발생 거래량</span>
+                  <span style={{ color: "#6b7280" }}>{fmt(hcCalc.cycleProfit.totalVolume, 0)} USDT</span>
+                </div>
+              </div>
+            )}
+
+            {/* 알림 가격 가이드 */}
+            {hcCalc.alertPrices.length > 0 && (
+              <div style={{ ...S.card, borderColor: "#1e1e2e" }}>
+                <div style={{ fontSize: 10, color: "#6b7280", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+                  📌 거래소 알림 설정 가이드
+                </div>
+                {hcCalc.alertPrices.map((ap, i) => (
+                  <div key={i} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "8px 10px", marginBottom: 4, borderRadius: 6,
+                    background: "#0a0a14", border: "1px solid #1e1e2e",
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: ap.color, fontWeight: 600 }}>{ap.label}</div>
+                      <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>
+                        현재가 대비 {fmtS(((ap.price - n(curPrice)) / n(curPrice)) * 100)}%
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: "#e2e8f0", fontFamily: "'IBM Plex Mono'" }}>
+                        ${fmt(ap.price)}
+                      </span>
+                      <button onClick={() => {
+                        try { navigator.clipboard.writeText(String(ap.price.toFixed(2))); } catch (e) {}
+                      }} style={{
+                        ...S.miniBtn, fontSize: 10, padding: "3px 6px",
+                        color: "#4b5563", borderColor: "#1e1e2e",
+                      }} title="복사">📋</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 사이클 실행 버튼 */}
+            {hcCalc.actions.length > 0 && (
+              <button onClick={() => {
+                const cp = n(curPrice);
+                if (!cp) return;
+                const profit = hcCalc.cycleProfit ? hcCalc.cycleProfit.netProfit : 0;
+
+                if (hcCalc.state === 1 || hcCalc.state === 2) {
+                  // State 1→2 또는 State 2→2 (원웨이): 익절+재진입+손절
+                  // Winner: 재진입이므로 진입가 = 현재가
+                  if (hcCalc.winner === "long") {
+                    setHcLongEntry(String(cp));
+                    setHcLongMargin(String(hcCalc.baseMg));
+                    // Loser(숏): 마진 cutRatio만큼 축소, 진입가 유지
+                    setHcShortMargin(String(Math.round(hcCalc.shortMg * (1 - hcCalc.cutRatio) * 100) / 100));
+                  } else {
+                    setHcShortEntry(String(cp));
+                    setHcShortMargin(String(hcCalc.baseMg));
+                    setHcLongMargin(String(Math.round(hcCalc.longMg * (1 - hcCalc.cutRatio) * 100) / 100));
+                  }
+                  // 지갑 잔고 업데이트 (수익 반영)
+                  setWallet(String(Math.round((n(wallet) + profit) * 100) / 100));
+                  setHcCycles((prev) => [...prev, {
+                    profit: Math.round(profit * 100) / 100,
+                    note: hcCalc.state === 1 ? "횡보 익절" : "원웨이 익절",
+                    ts: Date.now(),
+                  }]);
+                } else if (hcCalc.state === 3) {
+                  // State 3→1: 복구 — loser에 마진 채우기
+                  const loserEp = hcCalc.loser === "long" ? hcCalc.longEp : hcCalc.shortEp;
+                  const loserMg = hcCalc.loser === "long" ? hcCalc.longMg : hcCalc.shortMg;
+                  const fillMg = hcCalc.baseMg - loserMg;
+                  // 새 평단 = 조화평균
+                  const oldNotional = loserMg * hcCalc.lev;
+                  const addNotional = fillMg * hcCalc.lev;
+                  const oldQty = loserEp > 0 ? oldNotional / loserEp : 0;
+                  const addQty = cp > 0 ? addNotional / cp : 0;
+                  const newAvg = (oldNotional + addNotional) / (oldQty + addQty);
+                  if (hcCalc.loser === "long") {
+                    setHcLongEntry(String(Math.round(newAvg * 100) / 100));
+                    setHcLongMargin(String(hcCalc.baseMg));
+                  } else {
+                    setHcShortEntry(String(Math.round(newAvg * 100) / 100));
+                    setHcShortMargin(String(hcCalc.baseMg));
+                  }
+                  setHcCycles((prev) => [...prev, {
+                    profit: 0, note: "복구 완료", ts: Date.now(),
+                  }]);
+                }
+              }} style={{
+                width: "100%", padding: "14px 0", marginTop: 8, borderRadius: 10,
+                border: `1px solid ${hcCalc.state === 3 ? "#0ea5e944" : "#34d39944"}`,
+                background: hcCalc.state === 3 ? "#0ea5e910" : "#34d39910",
+                color: hcCalc.state === 3 ? "#0ea5e9" : "#34d399",
+                fontSize: 14, fontWeight: 700, cursor: "pointer",
+                fontFamily: "'DM Sans'", letterSpacing: 0.5,
+                transition: "all 0.15s",
+              }}>
+                {hcCalc.state === 3 ? "⚡ 복구 실행 (State 3 → 1)" : "⚡ 사이클 실행 (익절 + 손절)"}
+              </button>
+            )}
+
+            {/* 킬 스위치 */}
+            <div style={{
+              ...S.card, marginTop: 4,
+              borderColor: hcCalc.killAlert ? "#f8717144" : "#1e1e2e",
+              background: hcCalc.killAlert ? "#f8717108" : "#08080f",
+            }}>
+              <div style={{ fontSize: 10, color: hcCalc.killAlert ? "#f87171" : "#6b7280", letterSpacing: 2, marginBottom: 8, fontFamily: "'DM Sans'" }}>
+                {hcCalc.killAlert ? "🚨 킬 스위치 발동" : "안전장치"}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
+                <span style={{ color: "#94a3b8" }}>Equity: {fmt(hcCalc.equity)} USDT</span>
+                <span style={{ color: hcCalc.equityPct < 90 ? "#f87171" : "#34d399" }}>{fmt(hcCalc.equityPct, 1)}%</span>
+              </div>
+              <div style={{ height: 6, background: "#1e1e2e", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{
+                  height: "100%", borderRadius: 3,
+                  width: `${Math.max(Math.min(hcCalc.equityPct, 100), 0)}%`,
+                  background: hcCalc.equityPct > 90 ? "#34d399" : hcCalc.equityPct > 85 ? "#f59e0b" : "#f87171",
+                  transition: "width 0.3s",
+                }} />
+              </div>
+              <div style={{ fontSize: 10, color: "#4b5563", marginTop: 4 }}>
+                킬 스위치: {fmt(hcCalc.killThreshold)} USDT (-{hcKillPct}%) · 여유: {fmt(hcCalc.equity - hcCalc.killThreshold)} USDT
+              </div>
+              {hcCalc.killAlert && (
+                <div style={{ fontSize: 12, color: "#f87171", fontWeight: 700, marginTop: 8, textAlign: "center" }}>
+                  ⚠ 모든 포지션 즉시 청산 권고
+                </div>
+              )}
+            </div>
+
+            {/* 원웨이 시나리오 */}
+            {hcCalc.onewayScenario.length > 0 && (
+              <div style={{ ...S.card, marginTop: 4 }}>
+                <div style={{ fontSize: 10, color: "#6b7280", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+                  원웨이 시나리오 (되돌림 없이 계속 추세)
+                </div>
+                <div style={S.tblWrap}>
+                  <table style={S.tbl}>
+                    <thead>
+                      <tr>
+                        <TH>사이클</TH><TH>Loser 잔여 마진</TH><TH>누적 수익</TH><TH>누적 거래량</TH>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {hcCalc.onewayScenario.map((s) => (
+                        <tr key={s.cycle}>
+                          <TD c="#e2e8f0">#{s.cycle}</TD>
+                          <TD c={s.loserMg < 10 ? "#f87171" : "#94a3b8"}>{fmt(s.loserMg)} USDT</TD>
+                          <TD c="#34d399">+{fmt(s.cumProfit)}</TD>
+                          <TD c="#94a3b8">{fmt(s.cumVolume, 0)}</TD>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* 사이클 히스토리 */}
+            {hcCycles.length > 0 && (
+              <div style={{ ...S.card, marginTop: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: "#6b7280", letterSpacing: 2, fontFamily: "'DM Sans'" }}>
+                    사이클 기록
+                  </div>
+                  <button onClick={() => { if (confirm("사이클 기록을 모두 삭제할까요?")) setHcCycles([]); }}
+                    style={{ ...S.miniBtn, fontSize: 9, color: "#f87171" }}>기록 삭제</button>
+                </div>
+                {hcCycles.map((c, i) => (
+                  <div key={i} style={{
+                    display: "flex", justifyContent: "space-between", padding: "6px 0",
+                    borderBottom: "1px solid #0e0e18", fontSize: 12,
+                  }}>
+                    <span style={{ color: "#6b7280" }}>#{i + 1}</span>
+                    <span style={{ color: "#34d399" }}>+{fmt(c.profit)} USDT</span>
+                    <span style={{ color: "#4b5563" }}>{c.note || ""}</span>
+                  </div>
+                ))}
+                <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600 }}>
+                  <span style={{ color: "#6b7280" }}>누적: </span>
+                  <span style={{ color: "#34d399" }}>+{fmt(hcCycles.reduce((a, c) => a + n(c.profit), 0))} USDT</span>
+                </div>
+              </div>
+            )}
+
+          </>)}
+
+          <div style={S.footer}>
+            Hedge Cycle Bot · 3-State 순환 · ROE = 미실현손익 / 전략마진
+          </div>
+
+        </>)}
       </div>
     </div>
   );
