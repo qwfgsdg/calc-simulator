@@ -26,6 +26,45 @@ const mkDCA = () => ({ id: uid(), price: "", margin: "" });
 const mkPyra = () => ({ id: uid(), price: "", margin: "" });
 
 /* ═══════════════════════════════════════════
+   PERSISTENT STORAGE
+   ═══════════════════════════════════════════ */
+const STORAGE_KEY = "simv4-data";
+
+const storageAdapter = {
+  async save(key, data) {
+    const json = JSON.stringify(data);
+    try {
+      if (window.storage) {
+        await window.storage.set(key, json);
+        return true;
+      } else if (window.localStorage) {
+        localStorage.setItem(key, json);
+        return true;
+      }
+    } catch (e) { console.warn("Storage save failed:", e); }
+    return false;
+  },
+  async load(key) {
+    try {
+      if (window.storage) {
+        const result = await window.storage.get(key);
+        return result ? JSON.parse(result.value) : null;
+      } else if (window.localStorage) {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : null;
+      }
+    } catch (e) { console.warn("Storage load failed:", e); }
+    return null;
+  },
+  async clear(key) {
+    try {
+      if (window.storage) { await window.storage.delete(key); }
+      else if (window.localStorage) { localStorage.removeItem(key); }
+    } catch (e) { console.warn("Storage clear failed:", e); }
+  },
+};
+
+/* ═══════════════════════════════════════════
    MAIN COMPONENT
    ═══════════════════════════════════════════ */
 export default function SimV4() {
@@ -70,6 +109,62 @@ export default function SimV4() {
   const [pyraSplitMode, setPyraSplitMode] = useState(false);
   const [pyraSplitTotal, setPyraSplitTotal] = useState("");
   const [pyraSplitPrices, setPyraSplitPrices] = useState(["", "", ""]);
+
+  // ── 자동 저장 ──
+  const [saveStatus, setSaveStatus] = useState(null); // "saved" | "saving" | null
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const saveTimer = useRef(null);
+
+  // 마운트 시 저장된 데이터 복원
+  useEffect(() => {
+    (async () => {
+      const data = await storageAdapter.load(STORAGE_KEY);
+      if (data) {
+        if (data.wallet != null) setWallet(data.wallet);
+        if (data.feeRate != null) setFeeRate(data.feeRate);
+        if (data.exLiqPrice != null) setExLiqPrice(data.exLiqPrice);
+        if (data.priceCoin != null) setPriceCoin(data.priceCoin);
+        if (data.positions && data.positions.length > 0) {
+          setPositions(data.positions.map((p) => ({ ...mkPos(), ...p, id: p.id || uid() })));
+        }
+      }
+      setDataLoaded(true);
+    })();
+  }, []);
+
+  // A등급 데이터 변경 시 1초 debounce 자동 저장
+  useEffect(() => {
+    if (!dataLoaded) return; // 로드 완료 전에는 저장하지 않음
+    clearTimeout(saveTimer.current);
+    setSaveStatus("saving");
+    saveTimer.current = setTimeout(async () => {
+      const data = {
+        wallet, feeRate, exLiqPrice, priceCoin,
+        positions: positions.map((p) => ({
+          id: p.id, dir: p.dir, coin: p.coin,
+          entryPrice: p.entryPrice, margin: p.margin, leverage: p.leverage,
+        })),
+      };
+      const ok = await storageAdapter.save(STORAGE_KEY, data);
+      setSaveStatus(ok ? "saved" : null);
+    }, 1000);
+  }, [wallet, feeRate, exLiqPrice, priceCoin, positions, dataLoaded]);
+
+  const handleReset = async () => {
+    if (!confirm("모든 저장 데이터를 삭제하고 초기값으로 복원할까요?")) return;
+    await storageAdapter.clear(STORAGE_KEY);
+    setWallet("9120.57");
+    setFeeRate("0.04");
+    setExLiqPrice("171.36");
+    setPriceCoin("ETH");
+    setCurPrice("");
+    setPositions([
+      mkPos({ dir: "long", coin: "ETH", entryPrice: "3265.75707264", margin: "373.60", leverage: 50 }),
+      mkPos({ dir: "short", coin: "ETH", entryPrice: "1952.15", margin: "188.28", leverage: 50 }),
+    ]);
+    setSelId(null); setPyraMode(false);
+    setSaveStatus(null);
+  };
 
   // ── 실시간 가격 fetch ──
   useEffect(() => {
@@ -1144,7 +1239,28 @@ export default function SimV4() {
             <span style={S.hdrBadge}>CROSS MARGIN · FUTURES</span>
           </div>
           <h1 style={S.hdrTitle}>물타기 · 불타기 시뮬레이터</h1>
-          <p style={S.hdrSub}>다중 포지션 · 평단가 · 청산가 · 역계산 · 양방향 전략</p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+            <p style={S.hdrSub}>다중 포지션 · 평단가 · 청산가 · 역계산 · 양방향 전략</p>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {saveStatus === "saved" && (
+                <span style={{ fontSize: 9, color: "#34d399", fontFamily: "'DM Sans'" }}>
+                  💾 저장됨
+                </span>
+              )}
+              {saveStatus === "saving" && (
+                <span style={{ fontSize: 9, color: "#4b5563", fontFamily: "'DM Sans'" }}>
+                  저장 중...
+                </span>
+              )}
+              <button onClick={handleReset} style={{
+                fontSize: 9, padding: "3px 8px", borderRadius: 4,
+                border: "1px solid #1e1e2e", background: "transparent",
+                color: "#4b5563", cursor: "pointer", fontFamily: "'DM Sans'",
+              }} title="저장 데이터 삭제 및 초기화">
+                초기화
+              </button>
+            </div>
+          </div>
         </header>
 
         {/* ① ACCOUNT & MARKET */}
