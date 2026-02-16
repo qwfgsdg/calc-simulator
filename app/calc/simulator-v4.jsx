@@ -22,7 +22,8 @@ const pct = (a, b) => (b !== 0 ? (a / b) * 100 : 0);
    ═══════════════════════════════════════════ */
 const mkPos = (ov = {}) => ({
   id: uid(), dir: "long", coin: "ETH",
-  entryPrice: "", margin: "", leverage: 50, ...ov,
+  entryPrice: "", margin: "", leverage: 50, marginMode: "exchange", ...ov,
+  // marginMode: "exchange" = 거래소 마진(수수료 차감 후), "input" = 투입 금액(수수료 차감 전)
 });
 const mkDCA = () => ({ id: uid(), price: "", margin: "" });
 const mkPyra = () => ({ id: uid(), price: "", margin: "" });
@@ -180,7 +181,7 @@ export default function SimV4() {
         wallet, feeRate, coinLiqPrices, coinPrices,
         positions: positions.map((p) => ({
           id: p.id, dir: p.dir, coin: p.coin,
-          entryPrice: p.entryPrice, margin: p.margin, leverage: p.leverage,
+          entryPrice: p.entryPrice, margin: p.margin, leverage: p.leverage, marginMode: p.marginMode,
         })),
         hcMargin, hcLeverage, hcTakeROE, hcCutRatio, hcRecoveryROE, hcKillPct,
         hcLongEntry, hcShortEntry, hcLongMargin, hcShortMargin, hcCycles,
@@ -380,10 +381,15 @@ export default function SimV4() {
     if (!wb) return null;
 
     // ── Parse positions (코인별 현재가 적용) ──
+    // marginMode: "exchange" = 이미 수수료 차감된 거래소 마진, "input" = 투입 금액 (수수료 차감 전)
     const parsed = positions.map((p) => {
       const ep = n(p.entryPrice);
-      const mg = n(p.margin);
+      const rawMg = n(p.margin);
       const lev = n(p.leverage);
+      // 수수료 모델: 진입 + 청산 예약 수수료를 마진에서 차감
+      const feeDeduction = p.marginMode === "input" ? rawMg * lev * fee * 2 : 0;
+      const mg = p.marginMode === "input" ? rawMg - feeDeduction : rawMg;
+      const inputMg = p.marginMode === "input" ? rawMg : rawMg + rawMg * lev * fee * 2 / (1 - lev * fee * 2);
       const notional = mg * lev;
       const qty = ep > 0 ? notional / ep : 0;
       const sign = p.dir === "long" ? 1 : -1;
@@ -393,7 +399,10 @@ export default function SimV4() {
         pnl = sign * (pcp - ep) * qty;
         roe = pct(pnl, mg);
       }
-      return { ...p, ep, mg, lev, notional, qty, sign, pnl, roe, pcp };
+      const entryFee = notional * fee;
+      const reserveFee = notional * fee;
+      const totalFeeEst = entryFee + reserveFee;
+      return { ...p, ep, mg, rawMg, inputMg, feeDeduction, lev, notional, qty, sign, pnl, roe, pcp, entryFee, reserveFee, totalFeeEst };
     }).filter((p) => p.ep > 0 && p.mg > 0);
 
     // ── Account summary ──
@@ -515,10 +524,13 @@ export default function SimV4() {
         .filter((e) => n(e.price) > 0 && n(e.margin) > 0)
         .map((e) => {
           const price = n(e.price);
-          const addMargin = n(e.margin);
+          const rawMargin = n(e.margin);
+          // DCA 추가 마진도 수수료 차감 적용 (투입 금액 기준)
+          const feeDeduct = rawMargin * sel.lev * fee * 2;
+          const addMargin = rawMargin - feeDeduct;
           const addNotional = addMargin * sel.lev;
           const addQty = addNotional / price;
-          return { price, margin: addMargin, notional: addNotional, qty: addQty };
+          return { price, rawMargin, margin: addMargin, feeDeduct, notional: addNotional, qty: addQty };
         });
 
       if (dcaList.length > 0) {
@@ -571,13 +583,15 @@ export default function SimV4() {
 
         dcaResult = {
           dcaList, addTotalMargin,
+          addTotalRawMargin: dcaList.reduce((a, d) => a + d.rawMargin, 0),
+          addTotalFeeDeduct: dcaList.reduce((a, d) => a + d.feeDeduct, 0),
           before: { avg: sel.ep, margin: sel.mg, notional: sel.notional, qty: sel.qty, liq: exLiq || null, pnl: sel.pnl, roe: sel.roe, liqDist: liqDistPct },
           after: { avg: newAvg, margin: newMargin, notional: newNotional, qty: newQty, liq: afterLiq, pnl: afterPnL, roe: afterROE, liqDist: afterLiqDist },
           breakeven, moveNeeded, totalFee,
           afterFreeMargin, liqWorse,
           avgDelta: newAvg - sel.ep,
           avgDeltaPct: pct(newAvg - sel.ep, sel.ep),
-          marginInsufficient: addTotalMargin > Math.max(freeMargin, 0),
+          marginInsufficient: dcaList.reduce((a, d) => a + d.rawMargin, 0) > Math.max(freeMargin, 0),
         };
       }
     }
@@ -648,9 +662,14 @@ export default function SimV4() {
               maxReachableAvg = (sel.notional + maxNotional) / (sel.qty + maxQty);
             }
 
+            // 수수료 포함 투입 필요 금액 역산
+            const requiredInputMargin = addMargin / (1 - sel.lev * fee * 2);
+            const revFeeDeduct = requiredInputMargin - addMargin;
+
             revResult = {
               impossible: false,
               requiredMargin: addMargin,
+              requiredInputMargin, revFeeDeduct,
               requiredNotional: addNotional, addQty,
               before: { avg: sel.ep, margin: sel.mg, notional: sel.notional, qty: sel.qty, liq: exLiq || null, pnl: sel.pnl, roe: sel.roe, liqDist: liqDistPct },
               after: { avg: newAvg, margin: newMargin, notional: newNotional, qty: newQty, liq: afterLiq, pnl: afterPnL, roe: afterROE, liqDist: afterLiqDist },
@@ -842,7 +861,9 @@ export default function SimV4() {
           // Use the first DCA entry price if available, otherwise skip
           const dcaPrice = dcaEntries.length > 0 ? n(dcaEntries[0].price) : 0;
           if (dcaPrice > 0) {
-            const dcaMargin = remFreeMargin;
+            const dcaRawMargin = remFreeMargin;
+            const dcaFeeDeduct = dcaRawMargin * sel.lev * fee * 2;
+            const dcaMargin = dcaRawMargin - dcaFeeDeduct;
             const dcaNotional = dcaMargin * sel.lev;
             const dcaQty = dcaNotional / dcaPrice;
             const newQty2 = remQty + dcaQty;
@@ -933,10 +954,12 @@ export default function SimV4() {
         const results = strategies.map((strat) => {
           const totalWeight = strat.weights.reduce((a, w) => a + w, 0);
           const entries = sorted.map((price, i) => {
-            const margin = sTotal * strat.weights[i] / totalWeight;
+            const rawMargin = sTotal * strat.weights[i] / totalWeight;
+            const feeDeduct = rawMargin * sel.lev * fee * 2;
+            const margin = rawMargin - feeDeduct;
             const notional = margin * sel.lev;
             const qty = notional / price;
-            return { price, margin, notional, qty };
+            return { price, rawMargin, margin, feeDeduct, notional, qty };
           });
 
           const addNotional = entries.reduce((a, e) => a + e.notional, 0);
@@ -1008,10 +1031,12 @@ export default function SimV4() {
           .filter((e) => n(e.price) > 0 && n(e.margin) > 0)
           .map((e) => {
             const price = n(e.price);
-            const addMargin = n(e.margin);
+            const rawMargin = n(e.margin);
+            const feeDeduct = rawMargin * pyraCounter.lev * fee * 2;
+            const addMargin = rawMargin - feeDeduct;
             const addNotional = addMargin * pyraCounter.lev;
             const addQty = addNotional / price;
-            return { price, margin: addMargin, notional: addNotional, qty: addQty };
+            return { price, rawMargin, margin: addMargin, feeDeduct, notional: addNotional, qty: addQty };
           });
 
         if (pyraList.length > 0 || pyraCounter) {
@@ -1427,10 +1452,12 @@ export default function SimV4() {
         const results = strategies.map((strat) => {
           const totalWeight = strat.weights.reduce((a, w) => a + w, 0);
           const entries = sorted.map((price, i) => {
-            const margin = sTotal * strat.weights[i] / totalWeight;
+            const rawMargin = sTotal * strat.weights[i] / totalWeight;
+            const feeDeduct = rawMargin * pyraCounter.lev * fee * 2;
+            const margin = rawMargin - feeDeduct;
             const notional = margin * pyraCounter.lev;
             const qty = notional / price;
-            return { price, margin, notional, qty };
+            return { price, rawMargin, margin, feeDeduct, notional, qty };
           });
           return { name: strat.name, desc: strat.desc, entries };
         });
@@ -1863,7 +1890,7 @@ export default function SimV4() {
             onUpdate={updPos}
             onRemove={() => rmPos(pos.id)}
             canRemove={positions.length > 1}
-            cp={getCp(pos.coin)} />
+            cp={getCp(pos.coin)} feeRate={feeRate} />
         ))}
         <button onClick={addPos} style={S.addBtn}>+ 포지션 추가</button>
 
@@ -2839,7 +2866,7 @@ export default function SimV4() {
                   {fmt(rv.requiredMargin)} USDT
                 </div>
                 <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-                  필요 마진: {fmt(rv.requiredMargin)} USDT
+                  투입 필요: {fmt(rv.requiredInputMargin)} USDT <span style={{ color: "#4b5563" }}>(수수료 {fmt(rv.revFeeDeduct)} 포함)</span>
                 </div>
                 {rv.marginInsufficient && (
                   <div style={{ fontSize: 12, color: "#f87171", marginTop: 8 }}>
@@ -3551,6 +3578,13 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
       {/* Details */}
       <div style={S.detBox}>
         <div style={S.detTitle}>DETAILS</div>
+        {r.addTotalFeeDeduct > 0 && (
+          <>
+            <SL label="투입 금액" value={`${fmt(r.addTotalRawMargin)} USDT`} />
+            <SL label="수수료 예약 (진입+청산)" value={`-${fmt(r.addTotalFeeDeduct)} USDT`} warn />
+            <SL label="실제 추가 마진" value={`${fmt(r.addTotalMargin)} USDT`} />
+          </>
+        )}
         <SL label="왕복 수수료" value={`${fmt(r.totalFee)} USDT`} />
         <SL label="물타기 후 사용 가능" value={`${fmt(r.afterFreeMargin, 0)} USDT`}
           warn={r.afterFreeMargin < 0} />
@@ -3680,16 +3714,19 @@ function Inp({ value, onChange, ph }) {
   );
 }
 
-function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyra, onUpdate, onRemove, canRemove, cp }) {
+function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyra, onUpdate, onRemove, canRemove, cp, feeRate: fr }) {
   const [showMoreCoins, setShowMoreCoins] = useState(false);
   const dirC = pos.dir === "long" ? "#34d399" : "#f87171";
-  const ep = n(pos.entryPrice), mg = n(pos.margin), lev = n(pos.leverage);
+  const ep = n(pos.entryPrice), rawMg = n(pos.margin), lev = n(pos.leverage);
+  const fee = n(fr) / 100;
+  const feeDeduct = pos.marginMode === "input" ? rawMg * lev * fee * 2 : 0;
+  const mg = pos.marginMode === "input" ? rawMg - feeDeduct : rawMg;
   const notional = mg * lev;
   const qty = ep > 0 ? notional / ep : 0;
   const sign = pos.dir === "long" ? 1 : -1;
   const pnl = cp > 0 && qty > 0 ? sign * (cp - ep) * qty : null;
   const roe = pnl != null && mg > 0 ? (pnl / mg) * 100 : null;
-  const isEmpty = ep === 0 && mg === 0;
+  const isEmpty = ep === 0 && rawMg === 0;
 
   const borderColor = isPyraCounter ? "#f59e0b" : isPyraLocked ? "#6b728044" : isSel ? "#0ea5e9" : "#1e1e2e";
   const bgColor = isPyraCounter ? "#120e04" : isPyraLocked ? "#0a0a0e" : isSel ? "#060a14" : "#08080f";
@@ -3800,14 +3837,40 @@ function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyr
           <Inp value={pos.entryPrice} onChange={(v) => onUpdate(pos.id, "entryPrice", v)} ph="거래소에서 확인" />
         </Fld>
         <Fld label="마진 (USDT)">
-          <Inp value={pos.margin} onChange={(v) => onUpdate(pos.id, "margin", v)} ph="거래소에서 확인" />
+          <div style={{ display: "flex", gap: 3, marginBottom: 5 }}>
+            {[
+              { id: "exchange", label: "거래소 마진" },
+              { id: "input", label: "투입 금액" },
+            ].map((m) => (
+              <button key={m.id} onClick={() => onUpdate(pos.id, "marginMode", m.id)} style={{
+                flex: 1, padding: "3px 0", fontSize: 9, fontWeight: 600, borderRadius: 4, cursor: "pointer",
+                border: `1px solid ${pos.marginMode === m.id ? "#0ea5e933" : "#1e1e2e"}`,
+                background: pos.marginMode === m.id ? "#0ea5e908" : "transparent",
+                color: pos.marginMode === m.id ? "#0ea5e9" : "#4b5563",
+                fontFamily: "'DM Sans'", transition: "all 0.15s",
+              }}>{m.label}</button>
+            ))}
+          </div>
+          <Inp value={pos.margin} onChange={(v) => onUpdate(pos.id, "margin", v)}
+            ph={pos.marginMode === "input" ? "투입할 금액" : "거래소에서 확인"} />
         </Fld>
       </div>
-      {ep > 0 && mg > 0 && pnl != null && (
+      {ep > 0 && rawMg > 0 && (
         <div style={S.autoRow}>
-          <span style={{ color: pnl >= 0 ? "#34d399" : "#f87171" }}>
-            PnL: {fmtS(pnl)} ({fmtS(roe)}%)
-          </span>
+          {pnl != null && (
+            <span style={{ color: pnl >= 0 ? "#34d399" : "#f87171" }}>
+              PnL: {fmtS(pnl)} ({fmtS(roe)}%)
+            </span>
+          )}
+          {pos.marginMode === "input" && feeDeduct > 0 && (
+            <>
+              <span style={{ color: "#f59e0b" }}>수수료: {fmt(feeDeduct)}</span>
+              <span style={{ color: "#94a3b8" }}>실제 마진: {fmt(mg)}</span>
+            </>
+          )}
+          {pos.marginMode === "exchange" && fee > 0 && (
+            <span style={{ color: "#4b5563" }}>포지션: {fmt(notional)}</span>
+          )}
         </div>
       )}
     </div>
