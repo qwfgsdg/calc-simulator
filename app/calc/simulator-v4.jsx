@@ -69,12 +69,13 @@ const storageAdapter = {
    ═══════════════════════════════════════════ */
 export default function SimV4() {
   const [wallet, setWallet] = useState("9120.57");
-  const [curPrice, setCurPrice] = useState("");
+  const [coinPrices, setCoinPrices] = useState({}); // { ETH: "2647.35", BTC: "97340" }
   const [feeRate, setFeeRate] = useState("0.04");
-  const [exLiqPrice, setExLiqPrice] = useState("171.36");
+  const [coinLiqPrices, setCoinLiqPrices] = useState({ ETH: "171.36" }); // 코인별 거래소 청산가
+  const setLiqPrice = (coin, val) => setCoinLiqPrices(prev => ({ ...prev, [coin]: val }));
+  const getLiqPrice = (coin) => n(coinLiqPrices[coin] || "");
 
   // ── 실시간 가격 ──
-  const [priceCoin, setPriceCoin] = useState("ETH");
   const [priceMode, setPriceMode] = useState("manual"); // "live" | "manual"
   const [lastFetch, setLastFetch] = useState(null);
   const [priceDir, setPriceDir] = useState(null); // "up" | "down" | null
@@ -123,6 +124,14 @@ export default function SimV4() {
   const [hcLongMargin, setHcLongMargin] = useState("");      // 롱 현재 마진
   const [hcShortMargin, setHcShortMargin] = useState("");    // 숏 현재 마진
   const [hcCycles, setHcCycles] = useState([]);              // 사이클 히스토리
+
+  // ── 사용 중인 코인 자동 감지 ──
+  const usedCoins = useMemo(() => [...new Set(positions.map(p => p.coin))].sort(), [positions]);
+  const getCp = (coin) => n(coinPrices[coin] || "");
+  const setCp = (coin, val) => setCoinPrices(prev => ({ ...prev, [coin]: val }));
+  const primaryCoin = usedCoins[0] || "ETH";
+  const hasAnyPrice = usedCoins.some(c => getCp(c) > 0);
+
   const [saveStatus, setSaveStatus] = useState(null); // "saved" | "saving" | null
   const [dataLoaded, setDataLoaded] = useState(false);
   const saveTimer = useRef(null);
@@ -134,8 +143,12 @@ export default function SimV4() {
       if (data) {
         if (data.wallet != null) setWallet(data.wallet);
         if (data.feeRate != null) setFeeRate(data.feeRate);
-        if (data.exLiqPrice != null) setExLiqPrice(data.exLiqPrice);
-        if (data.priceCoin != null) setPriceCoin(data.priceCoin);
+        if (data.coinLiqPrices) setCoinLiqPrices(data.coinLiqPrices);
+        // 하위 호환: 이전 저장에 exLiqPrice(단일)이 있으면 마이그레이션
+        else if (data.exLiqPrice != null) setCoinLiqPrices({ ETH: data.exLiqPrice });
+        if (data.coinPrices) setCoinPrices(data.coinPrices);
+        // 하위 호환: 이전 저장 데이터에 priceCoin이 있으면 마이그레이션
+        else if (data.priceCoin) setCoinPrices({});
         if (data.positions && data.positions.length > 0) {
           setPositions(data.positions.map((p) => ({ ...mkPos(), ...p, id: p.id || uid() })));
         }
@@ -163,7 +176,7 @@ export default function SimV4() {
     setSaveStatus("saving");
     saveTimer.current = setTimeout(async () => {
       const data = {
-        wallet, feeRate, exLiqPrice, priceCoin,
+        wallet, feeRate, coinLiqPrices, coinPrices,
         positions: positions.map((p) => ({
           id: p.id, dir: p.dir, coin: p.coin,
           entryPrice: p.entryPrice, margin: p.margin, leverage: p.leverage,
@@ -174,7 +187,7 @@ export default function SimV4() {
       const ok = await storageAdapter.save(STORAGE_KEY, data);
       setSaveStatus(ok ? "saved" : null);
     }, 1000);
-  }, [wallet, feeRate, exLiqPrice, priceCoin, positions, dataLoaded,
+  }, [wallet, feeRate, coinLiqPrices, coinPrices, positions, dataLoaded,
       hcMargin, hcLeverage, hcTakeROE, hcCutRatio, hcRecoveryROE, hcKillPct,
       hcLongEntry, hcShortEntry, hcLongMargin, hcShortMargin, hcCycles]);
 
@@ -183,9 +196,8 @@ export default function SimV4() {
     await storageAdapter.clear(STORAGE_KEY);
     setWallet("9120.57");
     setFeeRate("0.04");
-    setExLiqPrice("171.36");
-    setPriceCoin("ETH");
-    setCurPrice("");
+    setCoinLiqPrices({ ETH: "171.36" });
+    setCoinPrices({});
     setPositions([
       mkPos({ dir: "long", coin: "ETH", entryPrice: "3265.75707264", margin: "373.60", leverage: 50 }),
       mkPos({ dir: "short", coin: "ETH", entryPrice: "1952.15", margin: "188.28", leverage: 50 }),
@@ -194,41 +206,76 @@ export default function SimV4() {
     setSaveStatus(null);
   };
 
-  // ── 실시간 가격 fetch ──
-  useEffect(() => {
-    if (priceMode !== "live") return;
-    const controller = new AbortController();
+  // ── 실시간 가격 fetch (다중 코인 · 적응형 주기) ──
+  const intervalRef = useRef(null);
+  const fetchRef = useRef(null);
 
-    const fetchPrice = async () => {
+  useEffect(() => {
+    if (priceMode !== "live" || usedCoins.length === 0) return;
+    const controller = new AbortController();
+    let errCount = 0;
+
+    const fetchPrices = async () => {
       try {
-        const res = await fetch(
-          `https://fapi.binance.com/fapi/v1/ticker/price?symbol=${priceCoin}USDT`,
-          { signal: controller.signal }
+        const results = await Promise.all(
+          usedCoins.map(coin =>
+            fetch(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${coin}USDT`, { signal: controller.signal })
+              .then(r => r.json())
+              .then(d => ({ coin, price: String(parseFloat(d.price)) }))
+          )
         );
-        const data = await res.json();
-        const val = String(parseFloat(data.price));
+        errCount = 0;
         setFetchError(false);
-        setCurPrice((prev) => {
-          if (val === prev) return prev;
-          const dir = prev && Number(val) > Number(prev) ? "up" : prev && Number(val) < Number(prev) ? "down" : null;
-          if (dir) {
-            setPriceDir(dir);
+        setCoinPrices(prev => {
+          const next = { ...prev };
+          let changed = false;
+          results.forEach(({ coin, price }) => {
+            if (next[coin] !== price) { next[coin] = price; changed = true; }
+          });
+          if (changed) {
+            setPriceDir("up");
             clearTimeout(priceDirTimer.current);
             priceDirTimer.current = setTimeout(() => setPriceDir(null), 500);
           }
-          return val;
+          return changed ? next : prev;
         });
         setLastFetch(Date.now());
       } catch (e) {
         if (e.name === "AbortError") return;
+        errCount++;
         setFetchError(true);
       }
     };
 
-    fetchPrice();
-    const interval = setInterval(fetchPrice, 5000);
-    return () => { controller.abort(); clearInterval(interval); };
-  }, [priceCoin, priceMode]);
+    const scheduleNext = () => {
+      let ms = 3000; // 기본 3초
+      if (document.hidden) ms = 10000; // 비활성 탭
+      else if (errCount > 0) ms = Math.min(10000 + errCount * 5000, 30000); // 에러 시 점진적 증가
+      // 트리거/역전가 근접 시 1초 (hcCalc, pyraResult에서 ±3% 이내)
+      // → state 직접 접근 불가하므로 DOM 대신 간단 체크
+      clearTimeout(intervalRef.current);
+      intervalRef.current = setTimeout(async () => {
+        await fetchPrices();
+        scheduleNext();
+      }, ms);
+    };
+
+    fetchPrices().then(scheduleNext);
+
+    // 탭 활성화 시 즉시 fetch
+    const onVisibility = () => {
+      if (!document.hidden) {
+        fetchPrices().then(scheduleNext);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      controller.abort();
+      clearTimeout(intervalRef.current);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [usedCoins.join(","), priceMode]);
 
   // Sync split helper from dcaEntries when opening
   const openSplitHelper = () => {
@@ -329,12 +376,10 @@ export default function SimV4() {
      ═══════════════════════════════════════════ */
   const calc = useMemo(() => {
     const wb = n(wallet);
-    const cp = n(curPrice);
     const fee = n(feeRate) / 100;
-    const exLiq = n(exLiqPrice);
     if (!wb) return null;
 
-    // ── Parse positions ──
+    // ── Parse positions (코인별 현재가 적용) ──
     const parsed = positions.map((p) => {
       const ep = n(p.entryPrice);
       const mg = n(p.margin);
@@ -342,35 +387,47 @@ export default function SimV4() {
       const notional = mg * lev;
       const qty = ep > 0 ? notional / ep : 0;
       const sign = p.dir === "long" ? 1 : -1;
+      const pcp = n(coinPrices[p.coin] || ""); // 포지션별 현재가
       let pnl = 0, roe = 0;
-      if (cp > 0 && qty > 0) {
-        pnl = sign * (cp - ep) * qty;
+      if (pcp > 0 && qty > 0) {
+        pnl = sign * (pcp - ep) * qty;
         roe = pct(pnl, mg);
       }
-      return { ...p, ep, mg, lev, notional, qty, sign, pnl, roe };
+      return { ...p, ep, mg, lev, notional, qty, sign, pnl, roe, pcp };
     }).filter((p) => p.ep > 0 && p.mg > 0);
 
     // ── Account summary ──
     const totalPnL = parsed.reduce((a, p) => a + p.pnl, 0);
     const equity = wb + totalPnL;
     const totalMargin = parsed.reduce((a, p) => a + p.mg, 0);
-    // Bybit 방식: 미실현 이익은 사용가능 마진에 반영하지 않음 (손실만 반영)
     const lossOnlyPnL = parsed.reduce((a, p) => a + Math.min(p.pnl, 0), 0);
     const availEquity = wb + lossOnlyPnL;
     const freeMargin = availEquity - totalMargin;
 
-    // ── Reverse-engineer maintenance margin from exchange liq price ──
-    // At liqPrice, equity = MM_actual
-    // equity(liqPrice) = wb + Σ sign_i × (liqPrice - ep_i) × qty_i
+    // 선택된 포지션 + 기준 현재가 (역산/청산가 계산용)
+    const sel = selId ? parsed.find((p) => p.id === selId) || null : null;
+    const cp = sel ? sel.pcp : (parsed.length > 0 ? parsed[0].pcp : 0);
+
+    // ── 코인별 청산가에서 MMR 역산 ──
+    // calcRefCoin의 청산가로 역산: 다른 코인 가격은 현재가 고정
+    const calcRefCoin = sel ? sel.coin : (parsed[0]?.coin || "");
+    const exLiq = getLiqPrice(calcRefCoin);
     let mmActual = null;
     let mmRate = null;
     let liqDistPct = null;
 
     if (exLiq > 0 && parsed.length > 0) {
-      mmActual = wb + parsed.reduce((a, p) => a + p.sign * (exLiq - p.ep) * p.qty, 0);
+      // equity at liq price: refCoin 포지션은 exLiq로 계산, 나머지는 현재가 고정
+      mmActual = wb + parsed.reduce((a, p) => {
+        const priceAtLiq = p.coin === calcRefCoin ? exLiq : p.pcp;
+        return a + (priceAtLiq > 0 ? p.sign * (priceAtLiq - p.ep) * p.qty : 0);
+      }, 0);
 
       // MMR = mmActual / totalNotionalAtLiqPrice
-      const totalNotionalAtLiq = parsed.reduce((a, p) => a + p.qty * exLiq, 0);
+      const totalNotionalAtLiq = parsed.reduce((a, p) => {
+        const priceAtLiq = p.coin === calcRefCoin ? exLiq : p.pcp;
+        return a + p.qty * (priceAtLiq > 0 ? priceAtLiq : 0);
+      }, 0);
       if (totalNotionalAtLiq > 0) {
         mmRate = mmActual / totalNotionalAtLiq;
       }
@@ -379,9 +436,6 @@ export default function SimV4() {
         liqDistPct = ((cp - exLiq) / cp) * 100;
       }
     }
-
-    // ── Selected position ──
-    const sel = parsed.find((p) => p.id === selId);
 
     // ── Helper: compute new liq price after position change ──
     // Given modified positions, solve for P where:
@@ -563,11 +617,13 @@ export default function SimV4() {
     // min() 클리핑으로 비선형이므로 이분법 탐색 사용
 
     // 주어진 가격 P에서 Bybit 방식 freeMargin 계산
+    // refCoin: P가 적용되는 코인. 나머지 코인은 현재가(pcp) 고정.
     const calcFreeMarginAt = (P, posArr, extraMargin = 0) => {
       const arr = posArr || parsed;
       const tMg = arr.reduce((a, p) => a + p.mg, 0) + extraMargin;
       const lossPnL = arr.reduce((a, p) => {
-        const pnl = p.sign * (P - p.ep) * p.qty;
+        const priceForP = p.coin === calcRefCoin ? P : p.pcp;
+        const pnl = priceForP > 0 ? p.sign * (priceForP - p.ep) * p.qty : 0;
         return a + Math.min(pnl, 0);
       }, 0);
       return wb + lossPnL - tMg;
@@ -623,7 +679,28 @@ export default function SimV4() {
           const changePct = ((neededPrice - cp) / cp) * 100;
           availCalc = { sufficient: false, neededPrice, direction, changePct };
         } else {
-          availCalc = { sufficient: false, impossible: true };
+          // 최대 확보 가능 금액 탐색 (샘플링)
+          let maxAvail = freeMargin;
+          let maxAvailPrice = cp;
+          const samples = 200;
+          for (let i = 0; i <= samples; i++) {
+            // 위쪽 탐색
+            const pUp = cp * (1 + (i / samples) * 10); // 0% ~ +1000%
+            const fUp = calcFreeMarginAt(pUp);
+            if (fUp > maxAvail) { maxAvail = fUp; maxAvailPrice = pUp; }
+            // 아래쪽 탐색
+            const pDn = cp * (1 - (i / samples) * 0.99); // 0% ~ -99%
+            if (pDn > 0) {
+              const fDn = calcFreeMarginAt(pDn);
+              if (fDn > maxAvail) { maxAvail = fDn; maxAvailPrice = pDn; }
+            }
+          }
+          const shortfall = tgt - maxAvail;
+          availCalc = {
+            sufficient: false, impossible: true,
+            maxAvail, maxAvailPrice, shortfall,
+            maxChangePct: ((maxAvailPrice - cp) / cp) * 100,
+          };
         }
       }
     }
@@ -1084,6 +1161,85 @@ export default function SimV4() {
             infos.push(`반대 포지션이 물린 포지션의 ${fmt(totalCounterMargin / lockedMargin, 1)}배입니다`);
           }
 
+          // 청산 시나리오 3가지
+          const closeScenarios = cp > 0 ? {
+            both: {
+              pnl: lockedPnLAt(cp) + counterPnLAt(cp),
+              fee: closeFeeAt(cp),
+              net: netPnLAt(cp),
+              label: "양쪽 동시 청산",
+            },
+            lockedOnly: {
+              pnl: lockedPnLAt(cp),
+              fee: lockedQty * cp * fee,
+              net: lockedPnLAt(cp) - lockedQty * cp * fee,
+              label: "물린 쪽만 청산",
+            },
+            counterOnly: {
+              pnl: counterPnLAt(cp),
+              fee: totalCounterQty * cp * fee,
+              net: counterPnLAt(cp) - totalCounterQty * cp * fee,
+              label: "불타기 쪽만 청산",
+            },
+          } : null;
+
+          // 역전가 프로그레스
+          let reversalProgress = null;
+          if (reversalPrice && cp > 0 && hasLocked) {
+            // 물린 포지션 진입가 → 역전가 구간에서 현재가의 위치
+            const start = lockedEp;
+            const end = reversalPrice;
+            const range = Math.abs(end - start);
+            if (range > 0) {
+              const dist = Math.abs(cp - start);
+              reversalProgress = Math.min(Math.max(dist / range, 0), 1);
+              // 방향 보정: 역전가 쪽으로 가고 있는지 확인
+              if (counterSign > 0) {
+                // counter가 롱이면 가격이 올라야 역전 → cp > start일 때 진행 중
+                reversalProgress = cp > start ? Math.min((cp - start) / (end - start), 1) : 0;
+              } else {
+                // counter가 숏이면 가격이 내려야 역전 → cp < start일 때 진행 중
+                reversalProgress = cp < start ? Math.min((start - cp) / (start - end), 1) : 0;
+              }
+              reversalProgress = Math.max(Math.min(reversalProgress, 1), 0);
+            }
+          }
+
+          // 불타기 vs 물타기 비교 (같은 금액을 물린 포지션에 DCA할 때)
+          let dcaComparison = null;
+          if (addTotalMargin > 0 && hasLocked && cp > 0) {
+            // 물타기: 물린 포지션의 대표 가격(첫 번째 pyraEntry 가격)으로 DCA
+            const dcaPrice = pyraList.length > 0 ? pyraList[0].price : cp;
+            const dcaNotional = addTotalMargin * (pyraLocked?.lev || pyraCounter.lev);
+            const dcaQty = dcaPrice > 0 ? dcaNotional / dcaPrice : 0;
+            const dcaNewNotional = (pyraLocked ? pyraLocked.notional : 0) + dcaNotional;
+            const dcaNewQty = lockedQty + dcaQty;
+            const dcaNewAvg = dcaNewQty > 0 ? dcaNewNotional / dcaNewQty : 0;
+            const dcaNewMargin = lockedMg + addTotalMargin;
+
+            // DCA 후 본전가 (수수료 포함)
+            const dcaBreakeven = lockedSign > 0
+              ? dcaNewAvg + (dcaNewNotional * fee * 2) / dcaNewQty
+              : dcaNewAvg - (dcaNewNotional * fee * 2) / dcaNewQty;
+
+            // DCA 후 청산가
+            let dcaLiq = null;
+            if (mmRate) {
+              const dcaParsed = [...parsed];
+              const idx = dcaParsed.findIndex((p) => p.id === pyraLockedId);
+              if (idx >= 0) {
+                dcaParsed[idx] = { ...dcaParsed[idx], ep: dcaNewAvg, mg: dcaNewMargin, notional: dcaNewNotional, qty: dcaNewQty };
+              }
+              dcaLiq = solveLiq(dcaParsed, mmRate);
+            }
+
+            dcaComparison = {
+              dcaAvg: dcaNewAvg, dcaBreakeven, dcaLiq, dcaMargin: dcaNewMargin,
+              pyraReversal: reversalPrice, pyraLiq: newLiqPrice,
+              dcaPrice,
+            };
+          }
+
           pyraResult = {
             locked: pyraLocked, counterDir, counterSign,
             existingCounter: pyraCounter,
@@ -1092,12 +1248,14 @@ export default function SimV4() {
               avg: totalCounterAvg, qty: totalCounterQty,
               margin: totalCounterMargin, notional: totalCounterNotional,
             },
-            reversalPrice, reversalDist,
+            reversalPrice, reversalDist, reversalProgress,
             combinedPnL, simultaneousClose,
+            closeScenarios,
             newLiqPrice, newLiqDist,
             liqBefore: exLiq || null, liqDistBefore: liqDistPct,
             stages, scenarios, warnings, infos,
             marginInsufficient: addTotalMargin > Math.max(freeMargin, 0),
+            dcaComparison,
           };
         }
       }
@@ -1241,7 +1399,7 @@ export default function SimV4() {
       pyraResult, pyraRevResult, pyraSplitResult,
       pyraLocked, pyraCounter,
     };
-  }, [wallet, curPrice, feeRate, exLiqPrice, positions, selId, dcaMode, dcaEntries, revPrice, revTarget, targetAvail, closeRatio, closePrice, splitMode, splitTotal, splitPrices, pyraMode, pyraLockedId, pyraCounterId, pyraSubMode, pyraEntries, pyraRevPrice, pyraRevTarget, pyraSplitMode, pyraSplitTotal, pyraSplitPrices]);
+  }, [wallet, coinPrices, feeRate, coinLiqPrices, positions, selId, dcaMode, dcaEntries, revPrice, revTarget, targetAvail, closeRatio, closePrice, splitMode, splitTotal, splitPrices, pyraMode, pyraLockedId, pyraCounterId, pyraSubMode, pyraEntries, pyraRevPrice, pyraRevTarget, pyraSplitMode, pyraSplitTotal, pyraSplitPrices]);
 
   const selPos = positions.find((p) => p.id === selId);
 
@@ -1249,7 +1407,7 @@ export default function SimV4() {
      HEDGE CYCLE CALC
      ═══════════════════════════════════════════ */
   const hcCalc = useMemo(() => {
-    const cp = n(curPrice);
+    const cp = getCp(primaryCoin);
     const wb = n(wallet);
     const baseMg = n(hcMargin);
     const lev = n(hcLeverage);
@@ -1473,7 +1631,7 @@ export default function SimV4() {
       isBalanced, ratio, onewayScenario,
       baseMg, lev, takeROE, cutRatio, recovROE, fee,
     };
-  }, [curPrice, wallet, feeRate, hcMargin, hcLeverage, hcTakeROE, hcCutRatio, hcRecoveryROE, hcKillPct,
+  }, [coinPrices, wallet, feeRate, hcMargin, hcLeverage, hcTakeROE, hcCutRatio, hcRecoveryROE, hcKillPct,
       hcLongEntry, hcShortEntry, hcLongMargin, hcShortMargin]);
 
   /* ═══════════════════════════════════════════
@@ -1549,54 +1707,40 @@ export default function SimV4() {
             <Inp value={wallet} onChange={setWallet} ph="9120.57" />
           </Fld>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, fontFamily: "'DM Sans'" }}>
-              현재가 ($) — {priceCoin}/USDT
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <select value={priceCoin} onChange={(e) => {
-                setPriceCoin(e.target.value);
-                setPriceMode("live");
-                setFetchError(false);
-              }} style={{ ...S.sel, width: 76, flex: "none" }}>
-                {COINS.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <input
-                type="number"
-                value={curPrice}
-                placeholder="코인 현재 가격"
-                readOnly={priceMode === "live"}
-                onChange={(e) => setCurPrice(e.target.value)}
-                onFocus={(e) => { if (priceMode === "manual") e.target.style.borderColor = "#0ea5e9"; }}
-                onBlur={(e) => { e.target.style.borderColor = priceMode === "live" ? "#34d39944" : "#1e1e2e"; }}
-                style={{
-                  ...S.inp,
-                  flex: 1,
-                  color: priceDir === "up" ? "#34d399" : priceDir === "down" ? "#f87171" : "#e2e8f0",
-                  borderColor: priceMode === "live" ? "#34d39944" : "#1e1e2e",
-                  background: priceMode === "live" ? "#060d08" : "#0a0a12",
-                  cursor: priceMode === "live" ? "default" : "text",
-                  transition: "color 0.3s, border-color 0.3s, background 0.3s",
-                }}
-              />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "'DM Sans'" }}>
+                현재가 ($)
+              </div>
               <button onClick={() => {
-                if (priceMode === "live") {
-                  setPriceMode("manual");
-                } else {
-                  setPriceMode("live");
-                  setFetchError(false);
-                }
+                if (priceMode === "live") { setPriceMode("manual"); }
+                else { setPriceMode("live"); setFetchError(false); }
               }} style={{
-                ...S.miniBtn,
-                width: 36, flex: "none", fontSize: 14,
+                ...S.miniBtn, fontSize: 9, padding: "2px 8px",
                 color: priceMode === "live" ? "#34d399" : "#6b7280",
                 borderColor: priceMode === "live" ? "#34d39933" : "#1e1e2e",
-                background: priceMode === "live" ? "#34d39908" : "transparent",
-              }}
-                title={priceMode === "live" ? "수동 입력으로 전환" : "실시간으로 전환"}
-              >
-                {priceMode === "live" ? "✎" : "↻"}
+              }}>
+                {priceMode === "live" ? "✎ 수동 전환" : "↻ 실시간"}
               </button>
             </div>
+            {usedCoins.map(coin => (
+              <div key={coin} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", width: 40, textAlign: "right", fontFamily: "'IBM Plex Mono'" }}>{coin}</span>
+                <input
+                  type="number"
+                  value={coinPrices[coin] || ""}
+                  placeholder={`${coin}/USDT`}
+                  readOnly={priceMode === "live"}
+                  onChange={(e) => setCp(coin, e.target.value)}
+                  style={{
+                    ...S.inp, flex: 1,
+                    borderColor: priceMode === "live" ? "#34d39944" : "#1e1e2e",
+                    background: priceMode === "live" ? "#060d08" : "#0a0a12",
+                    cursor: priceMode === "live" ? "default" : "text",
+                    transition: "color 0.3s, border-color 0.3s, background 0.3s",
+                  }}
+                />
+              </div>
+            ))}
             <div style={{ fontSize: 9, marginTop: 3, color: "#4b5563", fontFamily: "'DM Sans'" }}>
               {fetchError ? (
                 <span style={{ color: "#f87171" }}>연결 실패 · 수동 입력 모드</span>
@@ -1606,7 +1750,7 @@ export default function SimV4() {
                     display: "inline-block", width: 4, height: 4, borderRadius: "50%",
                     background: "#34d399", boxShadow: "0 0 6px #34d39966",
                   }} />
-                  Binance Futures 실시간
+                  Binance Futures 실시간 · {usedCoins.join(", ")}
                 </span>
               ) : (
                 <span>수동 입력 중 · <span
@@ -1618,9 +1762,17 @@ export default function SimV4() {
           </div>
         </div>
         <div style={{ ...S.grid2, marginTop: 8 }}>
-          <Fld label="거래소 강제 청산가 ($)">
-            <Inp value={exLiqPrice} onChange={setExLiqPrice} ph="거래소 화면에서 확인" />
-          </Fld>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, fontFamily: "'DM Sans'" }}>
+              거래소 강제 청산가 ($)
+            </div>
+            {usedCoins.map(coin => (
+              <div key={coin} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", width: 40, textAlign: "right", fontFamily: "'IBM Plex Mono'" }}>{coin}</span>
+                <Inp value={coinLiqPrices[coin] || ""} onChange={(v) => setLiqPrice(coin, v)} ph="거래소에서 확인" />
+              </div>
+            ))}
+          </div>
           <Fld label="수수료율 (%)">
             <Inp value={feeRate} onChange={setFeeRate} ph="0.04" />
           </Fld>
@@ -1638,12 +1790,12 @@ export default function SimV4() {
             onUpdate={updPos}
             onRemove={() => rmPos(pos.id)}
             canRemove={positions.length > 1}
-            cp={n(curPrice)} />
+            cp={getCp(pos.coin)} />
         ))}
         <button onClick={addPos} style={S.addBtn}>+ 포지션 추가</button>
 
         {/* ③ ACCOUNT SUMMARY */}
-        {calc && n(curPrice) > 0 && (
+        {calc && hasAnyPrice && (
           <>
             <Sec label="계좌 요약" />
             <div style={S.summaryGrid}>
@@ -1662,8 +1814,8 @@ export default function SimV4() {
             <div style={S.availBox}>
               <div style={S.availRow}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>목표 사용 가능 금액</div>
-                  <Inp value={targetAvail} onChange={setTargetAvail} ph="확보 목표 USDT" />
+                  <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>여유 마진 목표</div>
+                  <Inp value={targetAvail} onChange={setTargetAvail} ph="목표 금액 (USDT)" />
                 </div>
                 <div style={{ flex: 1, paddingLeft: 12, display: "flex", alignItems: "flex-end" }}>
                   {calc.availCalc ? (
@@ -1672,8 +1824,19 @@ export default function SimV4() {
                         ✓ 현재 충분
                       </div>
                     ) : calc.availCalc.impossible ? (
-                      <div style={{ fontSize: 12, color: "#f87171", paddingBottom: 10 }}>
-                        현재 포지션 구조에서 도달 불가
+                      <div style={{ paddingBottom: 6 }}>
+                        <div style={{ fontSize: 10, color: "#f87171", fontWeight: 600, marginBottom: 4 }}>
+                          가격 변동만으로 도달 불가
+                        </div>
+                        <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                          최대 확보 가능: <span style={{ color: "#f59e0b", fontWeight: 600 }}>{fmt(calc.availCalc.maxAvail)} USDT</span>
+                        </div>
+                        <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>
+                          (${fmt(calc.availCalc.maxAvailPrice)} · {fmtS(calc.availCalc.maxChangePct)}%)
+                        </div>
+                        <div style={{ fontSize: 10, color: "#f87171", marginTop: 2 }}>
+                          부족분 {fmt(calc.availCalc.shortfall)} USDT → 포지션 축소 필요
+                        </div>
                       </div>
                     ) : (
                       <div style={{ paddingBottom: 6 }}>
@@ -1696,13 +1859,13 @@ export default function SimV4() {
             </div>
 
             {/* Liquidation info */}
-            {n(exLiqPrice) > 0 ? (
+            {calc?.exLiq > 0 ? (
               <div style={S.liqBar}>
                 <div style={S.liqBarInner}>
                   <div>
                     <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>강제 청산가</div>
                     <div style={{ fontSize: 20, fontWeight: 700, color: "#f59e0b", fontFamily: "'DM Sans'" }}>
-                      ${fmt(n(exLiqPrice))}
+                      ${fmt(calc.exLiq)}
                     </div>
                   </div>
                   <div style={{ textAlign: "right" }}>
@@ -1784,7 +1947,7 @@ export default function SimV4() {
             <Sec label={`물타기 — ${selPos.coin} ${selPos.dir === "long" ? "롱" : "숏"}`} accent />
 
             <div style={S.modeRow}>
-              {[["sim", "시뮬레이션"], ["reverse", "목표 역계산"], ["close", "손절"]].map(([k, lb]) => (
+              {[["sim", "추가 진입"], ["reverse", "목표 평단"], ["close", "부분 청산"]].map(([k, lb]) => (
                 <button key={k} onClick={() => setDcaMode(k)} style={{
                   ...S.modeBtn,
                   background: dcaMode === k ? (k === "close" ? "#f8717115" : "#0ea5e915") : "transparent",
@@ -1792,6 +1955,11 @@ export default function SimV4() {
                   color: dcaMode === k ? (k === "close" ? "#f87171" : "#0ea5e9") : "#6b7280",
                 }}>{lb}</button>
               ))}
+            </div>
+            <div style={{ fontSize: 10, color: "#4b5563", marginBottom: 10, fontFamily: "'DM Sans'" }}>
+              {dcaMode === "sim" && "지정 가격에 추가 매수하면 평단·청산가·ROE가 어떻게 바뀌는지 미리 확인"}
+              {dcaMode === "reverse" && "원하는 평단가를 입력하면 필요한 마진/가격을 역으로 계산"}
+              {dcaMode === "close" && "지정 비율만큼 포지션을 줄였을 때의 손익과 잔여 포지션 확인"}
             </div>
 
             {dcaMode === "sim" && (
@@ -1815,7 +1983,7 @@ export default function SimV4() {
 
                 {/* Split helper — collapsible */}
                 <button onClick={openSplitHelper} style={S.splitToggle}>
-                  {splitMode ? "분할 도우미 접기 ▲" : "분할 도우미 열기 ▼"}
+                  {splitMode ? "분할 매수 전략 접기 ▲" : "분할 매수 전략 ▼"}
                 </button>
 
                 {splitMode && (
@@ -1889,7 +2057,7 @@ export default function SimV4() {
                                     <span style={{ color: "#6b7280" }}>탈출가</span>
                                     <span style={{ color: "#f59e0b" }}>${fmt(sr.breakeven)}</span>
                                   </div>
-                                  {n(exLiqPrice) > 0 && sr.afterLiq != null && (
+                                  {calc?.exLiq > 0 && sr.afterLiq != null && (
                                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
                                       <span style={{ color: "#6b7280" }}>청산가</span>
                                       <span style={{ color: "#e2e8f0" }}>${fmt(sr.afterLiq)}</span>
@@ -1965,7 +2133,7 @@ export default function SimV4() {
         )}
 
         {!selId && !pyraMode && (
-          <div style={S.empty}>↑ 포지션을 선택하면 물타기/불타기를 시뮬레이션할 수 있습니다</div>
+          <div style={S.empty}>↑ 포지션 카드에서 [물타기] 버튼을 눌러 추가 진입 · 목표 평단 · 부분 청산을 계산하세요</div>
         )}
 
         {/* ═══ ④-B PYRAMIDING SECTION ═══ */}
@@ -2020,7 +2188,7 @@ export default function SimV4() {
 
               {/* Sub-mode tabs */}
               <div style={S.modeRow}>
-                {[["sim", "시뮬레이션"], ["reverse", "역계산 (목표 역전가)"]].map(([k, lb]) => (
+                {[["sim", "추가 진입"], ["reverse", "목표 역전가"]].map(([k, lb]) => (
                   <button key={k} onClick={() => setPyraSubMode(k)} style={{
                     ...S.modeBtn,
                     background: pyraSubMode === k ? "#f59e0b15" : "transparent",
@@ -2053,7 +2221,7 @@ export default function SimV4() {
 
                   {/* Split helper */}
                   <button onClick={openPyraSplitHelper} style={{ ...S.splitToggle, borderColor: "#f59e0b33", color: "#f59e0b66" }}>
-                    {pyraSplitMode ? "분할 도우미 접기 ▲" : "분할 도우미 열기 ▼"}
+                    {pyraSplitMode ? "분할 매수 전략 접기 ▲" : "분할 매수 전략 ▼"}
                   </button>
 
                   {pyraSplitMode && (
@@ -2148,7 +2316,7 @@ export default function SimV4() {
         {/* ═══ ⑤-B PYRAMIDING RESULTS ═══ */}
         {calc?.pyraResult && calc.cp > 0 && (() => {
           const pr = calc.pyraResult;
-          const hasExLiq = n(exLiqPrice) > 0;
+          const hasExLiq = calc?.exLiq > 0;
 
           return (
             <>
@@ -2160,41 +2328,86 @@ export default function SimV4() {
                 <div key={i} style={S.warnBox}>⚠ {w.message}</div>
               ))}
 
-              {/* Highlight cards */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-                <HLCard label="손익 역전가"
-                  value={pr.reversalPrice ? `$${fmt(pr.reversalPrice)}` : "—"}
-                  delta={pr.reversalDist != null ? `현재가서 ${fmtS(pr.reversalDist)}%` : null}
-                  deltaColor="#f59e0b" />
+              {/* 역전가 프로그레스 */}
+              {pr.reversalPrice && (
+                <div style={{ ...S.card, borderColor: "#f59e0b33", marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ fontSize: 10, color: "#f59e0b", letterSpacing: 2, fontFamily: "'DM Sans'" }}>
+                      본전 회복 가격
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", fontFamily: "'IBM Plex Mono'" }}>
+                      ${fmt(pr.reversalPrice)}
+                    </div>
+                  </div>
+                  <div style={{ height: 8, background: "#1e1e2e", borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{
+                      height: "100%", borderRadius: 4, transition: "width 0.3s",
+                      width: `${Math.max((pr.reversalProgress || 0) * 100, 0)}%`,
+                      background: (pr.reversalProgress || 0) >= 1 ? "#34d399" : "linear-gradient(90deg, #f59e0b, #34d399)",
+                    }} />
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, marginTop: 4, color: "#4b5563" }}>
+                    <span>현재가서 {fmtS(pr.reversalDist)}%</span>
+                    <span style={{ color: (pr.reversalProgress || 0) >= 1 ? "#34d399" : "#f59e0b" }}>
+                      {(pr.reversalProgress || 0) >= 1 ? "🎉 역전 달성!" : `${fmt((pr.reversalProgress || 0) * 100, 0)}%`}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* 청산 시나리오 비교 */}
+              {pr.closeScenarios && (
+                <div style={{ ...S.card, borderColor: "#1e1e2e", marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, color: "#6b7280", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+                    지금 청산하면?
+                  </div>
+                  {[pr.closeScenarios.both, pr.closeScenarios.counterOnly, pr.closeScenarios.lockedOnly].map((sc, i) => (
+                    <div key={i} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "10px 12px", marginBottom: 4, borderRadius: 8,
+                      background: i === 0 ? (sc.net >= 0 ? "#34d39908" : "#f8717108") : "#0a0a14",
+                      border: `1px solid ${i === 0 ? (sc.net >= 0 ? "#34d39922" : "#f8717122") : "#1e1e2e"}`,
+                    }}>
+                      <div>
+                        <div style={{ fontSize: 12, color: "#e2e8f0", fontWeight: i === 0 ? 600 : 400 }}>{sc.label}</div>
+                        <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>수수료 -{fmt(sc.fee)}</div>
+                      </div>
+                      <div style={{
+                        fontSize: i === 0 ? 15 : 13, fontWeight: 700,
+                        color: sc.net >= 0 ? "#34d399" : "#f87171",
+                        fontFamily: "'IBM Plex Mono'",
+                      }}>
+                        {fmtS(sc.net)} USDT
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 합산 PnL + 청산가 */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
                 <HLCard label="현재 합산 PnL"
                   value={`${fmtS(pr.combinedPnL)} USDT`}
-                  delta={`물린 ${fmtS(pr.locked.pnl)} / 반대 ${fmtS(pr.combinedPnL - pr.locked.pnl)}`}
+                  delta={`물린 ${fmtS(pr.locked?.pnl || 0)} / 반대 ${fmtS(pr.combinedPnL - (pr.locked?.pnl || 0))}`}
                   deltaColor={pr.combinedPnL >= 0 ? "#34d399" : "#f87171"} />
-                <HLCard label="동시 청산 순손익"
-                  value={`${fmtS(pr.simultaneousClose)} USDT`}
-                  delta="수수료 포함"
-                  deltaColor={pr.simultaneousClose >= 0 ? "#34d399" : "#f87171"} />
-              </div>
-
-              {/* New liq info */}
-              {hasExLiq && pr.newLiqPrice != null && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+                {hasExLiq && pr.newLiqPrice != null ? (
                   <HLCard label="새 청산가 (추정)"
                     value={`$${fmt(pr.newLiqPrice)}`}
-                    delta={pr.newLiqDist != null ? `현재가 대비 ${fmt(Math.abs(pr.newLiqDist))}% 여유` : null}
+                    delta={pr.newLiqDist != null ? `여유 ${fmt(Math.abs(pr.newLiqDist))}%${pr.liqBefore ? ` (기존 $${fmt(pr.liqBefore)})` : ""}` : null}
                     deltaColor={Math.abs(pr.newLiqDist || 0) < 15 ? "#f87171" : "#34d399"} />
+                ) : (
                   <HLCard label="기존 청산가"
                     value={pr.liqBefore ? `$${fmt(pr.liqBefore)}` : "—"}
                     delta={pr.liqDistBefore != null ? `${fmt(Math.abs(pr.liqDistBefore))}% 여유` : null}
                     deltaColor="#6b7280" />
-                </div>
-              )}
+                )}
+              </div>
 
               {/* Stage-by-stage table */}
               {pr.stages.length > 0 && (
                 <>
                   <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: "#f59e0b", fontFamily: "'DM Sans'", marginBottom: 8 }}>
-                    단계별 변화
+                    진입 단계별 역전가 변화
                   </div>
                   <div style={S.tblWrap}>
                     <table style={S.tbl}>
@@ -2345,6 +2558,70 @@ export default function SimV4() {
                   ))}
                 </div>
               )}
+
+              {/* 불타기 vs 물타기 비교 */}
+              {pr.dcaComparison && pr.pyraList.length > 0 && (
+                <div style={{ ...S.card, borderColor: "#6b728033", marginTop: 8 }}>
+                  <div style={{ fontSize: 10, color: "#6b7280", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+                    같은 금액({fmt(pr.addTotalMargin, 0)} USDT) 투입 시 비교
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr", gap: 0, fontSize: 12 }}>
+                    {/* header */}
+                    <div style={{ padding: "6px 8px", color: "#4b5563", fontSize: 10 }}></div>
+                    <div style={{ padding: "6px 8px", color: "#f59e0b", fontSize: 10, fontWeight: 700, textAlign: "center" }}>🔥 불타기</div>
+                    <div style={{ padding: "6px 8px", color: "#0ea5e9", fontSize: 10, fontWeight: 700, textAlign: "center" }}>💧 물타기</div>
+                    {/* 본전/역전 가격 */}
+                    <div style={{ padding: "6px 8px", color: "#6b7280", fontSize: 10, borderTop: "1px solid #1e1e2e" }}>본전/역전가</div>
+                    <div style={{ padding: "6px 8px", textAlign: "center", borderTop: "1px solid #1e1e2e", color: "#f59e0b", fontWeight: 600 }}>
+                      {pr.dcaComparison.pyraReversal ? `$${fmt(pr.dcaComparison.pyraReversal)}` : "—"}
+                    </div>
+                    <div style={{ padding: "6px 8px", textAlign: "center", borderTop: "1px solid #1e1e2e", color: "#0ea5e9", fontWeight: 600 }}>
+                      ${fmt(pr.dcaComparison.dcaBreakeven)}
+                    </div>
+                    {/* 청산가 */}
+                    {hasExLiq && (<>
+                      <div style={{ padding: "6px 8px", color: "#6b7280", fontSize: 10, borderTop: "1px solid #0e0e18" }}>청산가</div>
+                      <div style={{ padding: "6px 8px", textAlign: "center", borderTop: "1px solid #0e0e18", color: "#94a3b8" }}>
+                        {pr.dcaComparison.pyraLiq ? `$${fmt(pr.dcaComparison.pyraLiq)}` : "—"}
+                      </div>
+                      <div style={{ padding: "6px 8px", textAlign: "center", borderTop: "1px solid #0e0e18", color: "#94a3b8" }}>
+                        {pr.dcaComparison.dcaLiq ? `$${fmt(pr.dcaComparison.dcaLiq)}` : "—"}
+                      </div>
+                    </>)}
+                    {/* 특징 */}
+                    <div style={{ padding: "6px 8px", color: "#6b7280", fontSize: 10, borderTop: "1px solid #0e0e18" }}>특징</div>
+                    <div style={{ padding: "6px 8px", textAlign: "center", borderTop: "1px solid #0e0e18", fontSize: 10, color: "#4b5563" }}>
+                      양방향 헷지 유지
+                    </div>
+                    <div style={{ padding: "6px 8px", textAlign: "center", borderTop: "1px solid #0e0e18", fontSize: 10, color: "#4b5563" }}>
+                      평단 낮추기 집중
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 불타기 적용 원클릭 */}
+              {pr.pyraList.length > 0 && (
+                <button onClick={() => {
+                  // counter 포지션 업데이트
+                  const newAvg = pr.counter.avg;
+                  const newMargin = pr.counter.margin;
+                  updPos(pyraCounterId, "entryPrice", String(Math.round(newAvg * 100) / 100));
+                  updPos(pyraCounterId, "margin", String(Math.round(newMargin * 100) / 100));
+                  // 진입 목록 초기화
+                  setPyraEntries([mkPyra()]);
+                }} style={{
+                  width: "100%", padding: "14px 0", marginTop: 12, borderRadius: 10,
+                  border: "1px solid #f59e0b44",
+                  background: "#f59e0b10",
+                  color: "#f59e0b",
+                  fontSize: 14, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "'DM Sans'", letterSpacing: 0.5,
+                  transition: "all 0.15s",
+                }}>
+                  ⚡ 불타기 적용 — 평단 ${fmt(pr.counter.avg)} · 마진 {fmt(pr.counter.margin, 0)}
+                </button>
+              )}
             </>
           );
         })()}
@@ -2402,7 +2679,7 @@ export default function SimV4() {
         {calc?.dcaResult && (() => {
           const r = calc.dcaResult;
           const isLong = calc.sel.dir === "long";
-          return <ResultBlock r={r} isLong={isLong} cp={calc.cp} mode="sim" hasExLiq={n(exLiqPrice) > 0} />;
+          return <ResultBlock r={r} isLong={isLong} cp={calc.cp} mode="sim" hasExLiq={calc?.exLiq > 0} />;
         })()}
 
         {/* ⑤ RESULTS — Reverse */}
@@ -2446,7 +2723,7 @@ export default function SimV4() {
                   <div style={{ fontSize: 12, color: "#34d399", marginTop: 8 }}>✓ 여유 마진 내 가능</div>
                 )}
               </div>
-              <ResultBlock r={rv} isLong={isLong} cp={calc.cp} mode="reverse" hasExLiq={n(exLiqPrice) > 0} />
+              <ResultBlock r={rv} isLong={isLong} cp={calc.cp} mode="reverse" hasExLiq={calc?.exLiq > 0} />
             </>
           );
         })()}
@@ -2455,7 +2732,7 @@ export default function SimV4() {
         {calc?.closeResult && (() => {
           const cr = calc.closeResult;
           const isLong = calc.sel.dir === "long";
-          const hasExLiq = n(exLiqPrice) > 0;
+          const hasExLiq = calc?.exLiq > 0;
           return (
             <>
               <div style={S.divider} />
@@ -2593,28 +2870,26 @@ export default function SimV4() {
               <Inp value={wallet} onChange={setWallet} ph="10000" />
             </Fld>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, fontFamily: "'DM Sans'" }}>
-                현재가 ($) — {priceCoin}/USDT
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <select value={priceCoin} onChange={(e) => { setPriceCoin(e.target.value); setPriceMode("live"); setFetchError(false); }}
-                  style={{ ...S.sel, width: 76, flex: "none" }}>
-                  {COINS.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <input type="number" value={curPrice} placeholder="현재 가격"
-                  readOnly={priceMode === "live"} onChange={(e) => setCurPrice(e.target.value)}
-                  style={{ ...S.inp, flex: 1, borderColor: priceMode === "live" ? "#34d39944" : "#1e1e2e",
-                    color: priceDir === "up" ? "#34d399" : priceDir === "down" ? "#f87171" : "#e2e8f0",
-                    background: priceMode === "live" ? "#060d08" : "#0a0a12",
-                    cursor: priceMode === "live" ? "default" : "text", transition: "color 0.3s" }} />
-                <button onClick={() => { priceMode === "live" ? setPriceMode("manual") : (setPriceMode("live"), setFetchError(false)); }}
-                  style={{ ...S.miniBtn, width: 36, flex: "none", fontSize: 14,
-                    color: priceMode === "live" ? "#34d399" : "#6b7280",
-                    borderColor: priceMode === "live" ? "#34d39933" : "#1e1e2e" }}
-                  title={priceMode === "live" ? "수동 입력" : "실시간"}>
-                  {priceMode === "live" ? "✎" : "↻"}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "'DM Sans'" }}>
+                  현재가 ($) — {primaryCoin}/USDT
+                </div>
+                <button onClick={() => {
+                  if (priceMode === "live") { setPriceMode("manual"); }
+                  else { setPriceMode("live"); setFetchError(false); }
+                }} style={{
+                  ...S.miniBtn, fontSize: 9, padding: "2px 8px",
+                  color: priceMode === "live" ? "#34d399" : "#6b7280",
+                  borderColor: priceMode === "live" ? "#34d39933" : "#1e1e2e",
+                }}>
+                  {priceMode === "live" ? "✎ 수동" : "↻ 실시간"}
                 </button>
               </div>
+              <input type="number" value={coinPrices[primaryCoin] || ""} placeholder={`${primaryCoin}/USDT`}
+                readOnly={priceMode === "live"} onChange={(e) => setCp(primaryCoin, e.target.value)}
+                style={{ ...S.inp, flex: 1, borderColor: priceMode === "live" ? "#34d39944" : "#1e1e2e",
+                  background: priceMode === "live" ? "#060d08" : "#0a0a12",
+                  cursor: priceMode === "live" ? "default" : "text", transition: "color 0.3s" }} />
             </div>
           </div>
 
@@ -2684,7 +2959,7 @@ export default function SimV4() {
           </div>
 
           {/* HC ④ 상태 대시보드 */}
-          {hcCalc && n(curPrice) > 0 && (<>
+          {hcCalc && getCp(primaryCoin) > 0 && (<>
             <Sec label="상태 대시보드" />
 
             {/* 현재 상태 표시 */}
@@ -2735,7 +3010,7 @@ export default function SimV4() {
                             ${fmt(hcCalc.winner === "long" ? hcCalc.longTriggerPrice : hcCalc.shortTriggerPrice)}
                           </span>
                           <span style={{ color: "#4b5563", marginLeft: 6 }}>
-                            ({fmtS(((hcCalc.winner === "long" ? hcCalc.longTriggerPrice : hcCalc.shortTriggerPrice) - n(curPrice)) / n(curPrice) * 100)}%)
+                            ({fmtS(((hcCalc.winner === "long" ? hcCalc.longTriggerPrice : hcCalc.shortTriggerPrice) - getCp(primaryCoin)) / getCp(primaryCoin) * 100)}%)
                           </span>
                         </>
                       )}
@@ -2760,7 +3035,7 @@ export default function SimV4() {
                 <div style={{ fontSize: 11, color: "#4b5563", marginTop: 6 }}>
                   복구 가격: <span style={{ color: "#e2e8f0" }}>${fmt(hcCalc.recoveryPrice)}</span>
                   <span style={{ color: "#4b5563", marginLeft: 6 }}>
-                    ({fmtS(((hcCalc.recoveryPrice) - n(curPrice)) / n(curPrice) * 100)}%)
+                    ({fmtS(((hcCalc.recoveryPrice) - getCp(primaryCoin)) / getCp(primaryCoin) * 100)}%)
                   </span>
                 </div>
               </div>
@@ -2848,7 +3123,7 @@ export default function SimV4() {
                     <div>
                       <div style={{ fontSize: 11, color: ap.color, fontWeight: 600 }}>{ap.label}</div>
                       <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>
-                        현재가 대비 {fmtS(((ap.price - n(curPrice)) / n(curPrice)) * 100)}%
+                        현재가 대비 {fmtS(((ap.price - getCp(primaryCoin)) / getCp(primaryCoin)) * 100)}%
                       </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -2870,7 +3145,7 @@ export default function SimV4() {
             {/* 사이클 실행 버튼 */}
             {hcCalc.actions.length > 0 && (
               <button onClick={() => {
-                const cp = n(curPrice);
+                const cp = getCp(primaryCoin);
                 if (!cp) return;
                 const profit = hcCalc.cycleProfit ? hcCalc.cycleProfit.netProfit : 0;
 
