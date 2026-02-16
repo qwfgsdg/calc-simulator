@@ -68,10 +68,10 @@ const storageAdapter = {
    MAIN COMPONENT
    ═══════════════════════════════════════════ */
 export default function SimV4() {
-  const [wallet, setWallet] = useState("9120.57");
+  const [wallet, setWallet] = useState("");
   const [coinPrices, setCoinPrices] = useState({}); // { ETH: "2647.35", BTC: "97340" }
   const [feeRate, setFeeRate] = useState("0.04");
-  const [coinLiqPrices, setCoinLiqPrices] = useState({ ETH: "171.36" }); // 코인별 거래소 청산가
+  const [coinLiqPrices, setCoinLiqPrices] = useState({}); // 코인별 거래소 청산가
   const setLiqPrice = (coin, val) => setCoinLiqPrices(prev => ({ ...prev, [coin]: val }));
   const getLiqPrice = (coin) => n(coinLiqPrices[coin] || "");
 
@@ -83,8 +83,7 @@ export default function SimV4() {
   const priceDirTimer = useRef(null);
 
   const [positions, setPositions] = useState([
-    mkPos({ dir: "long", coin: "ETH", entryPrice: "3265.75707264", margin: "373.60", leverage: 50 }),
-    mkPos({ dir: "short", coin: "ETH", entryPrice: "1952.15", margin: "188.28", leverage: 50 }),
+    mkPos(),
   ]);
 
   const [selId, setSelId] = useState(null);
@@ -194,13 +193,12 @@ export default function SimV4() {
   const handleReset = async () => {
     if (!confirm("모든 저장 데이터를 삭제하고 초기값으로 복원할까요?")) return;
     await storageAdapter.clear(STORAGE_KEY);
-    setWallet("9120.57");
+    setWallet("");
     setFeeRate("0.04");
-    setCoinLiqPrices({ ETH: "171.36" });
+    setCoinLiqPrices({});
     setCoinPrices({});
     setPositions([
-      mkPos({ dir: "long", coin: "ETH", entryPrice: "3265.75707264", margin: "373.60", leverage: 50 }),
-      mkPos({ dir: "short", coin: "ETH", entryPrice: "1952.15", margin: "188.28", leverage: 50 }),
+      mkPos(),
     ]);
     setSelId(null); setPyraMode(false);
     setSaveStatus(null);
@@ -455,6 +453,58 @@ export default function SimV4() {
       const liq = (wb - sumSignEpQty) / denom;
       return liq > 0 ? liq : 0;
     };
+
+    // ── 코인별 청산가 자동 계산 (MMR 역산 기반) ──
+    // targetCoin의 가격만 움직이고, 나머지 코인은 현재가 고정 가정
+    // equity(P) = wb + Σ pnl_i(P) = mmr × Σ notional_i(P)
+    // targetCoin 포지션: pnl = sign*(P - ep)*qty, notional = qty*P
+    // 다른 코인: pnl = sign*(pcp - ep)*qty (고정), notional = qty*pcp (고정)
+    // => wb + Σ_target[sign*(P-ep)*qty] + Σ_other[pnl_fixed] = mmr × (Σ_target[qty*P] + Σ_other[notional_fixed])
+    // => wb + P*Σ_t(sign*qty) - Σ_t(sign*ep*qty) + otherPnL = mmr*(P*Σ_t(qty) + otherNotional)
+    // => P*(Σ_t(sign*qty) - mmr*Σ_t(qty)) = mmr*otherNotional - wb + Σ_t(sign*ep*qty) - otherPnL
+    // => P = (mmr*otherNotional - wb + Σ_t(sign*ep*qty) - otherPnL) / (Σ_t(sign*qty) - mmr*Σ_t(qty))
+    const solveLiqForCoin = (targetCoin, posArr, mmr) => {
+      if (!mmr || mmr <= 0) return null;
+      const targetPos = posArr.filter(p => p.coin === targetCoin);
+      const otherPos = posArr.filter(p => p.coin !== targetCoin);
+      if (targetPos.length === 0) return null;
+
+      const sumTSignQty = targetPos.reduce((a, p) => a + p.sign * p.qty, 0);
+      const sumTSignEpQty = targetPos.reduce((a, p) => a + p.sign * p.ep * p.qty, 0);
+      const sumTQty = targetPos.reduce((a, p) => a + p.qty, 0);
+
+      const otherPnL = otherPos.reduce((a, p) => {
+        return a + (p.pcp > 0 ? p.sign * (p.pcp - p.ep) * p.qty : 0);
+      }, 0);
+      const otherNotional = otherPos.reduce((a, p) => {
+        return a + p.qty * (p.pcp > 0 ? p.pcp : 0);
+      }, 0);
+
+      const numer = mmr * otherNotional - wb + sumTSignEpQty - otherPnL;
+      const denom = sumTSignQty - mmr * sumTQty;
+      if (Math.abs(denom) < 1e-12) return null;
+      const liq = numer / denom;
+      return liq > 0 ? liq : 0;
+    };
+
+    // 자동 계산된 코인별 청산가 맵
+    const autoLiqPrices = {};
+    if (mmRate && parsed.length > 0) {
+      const allCoins = [...new Set(parsed.map(p => p.coin))];
+      allCoins.forEach(coin => {
+        // 이미 사용자가 직접 입력한 코인은 스킵 (기준 코인)
+        if (coin === calcRefCoin) return;
+        const coinPosCount = parsed.filter(p => p.coin === coin).length;
+        if (coinPosCount === 0) return;
+        // 해당 코인의 현재가가 있어야 계산 가능
+        const coinCp = n(coinPrices[coin] || "");
+        if (coinCp <= 0) return;
+        const liq = solveLiqForCoin(coin, parsed, mmRate);
+        if (liq != null && liq > 0) {
+          autoLiqPrices[coin] = liq;
+        }
+      });
+    }
 
     // ── Build DCA result (sim mode) ──
     let dcaResult = null;
@@ -1392,7 +1442,7 @@ export default function SimV4() {
     }
 
     return {
-      parsed, wb, cp, fee, exLiq,
+      parsed, wb, cp, fee, exLiq, calcRefCoin, autoLiqPrices, solveLiqForCoin,
       totalPnL, equity, totalMargin, freeMargin,
       mmActual, mmRate, liqDistPct,
       sel, dcaResult, revResult, closeResult, splitResult, availCalc,
@@ -1704,7 +1754,7 @@ export default function SimV4() {
         <Sec label="계좌 & 시장" />
         <div style={S.grid2}>
           <Fld label="지갑 총 잔고 (USDT)">
-            <Inp value={wallet} onChange={setWallet} ph="9120.57" />
+            <Inp value={wallet} onChange={setWallet} ph="거래소에서 확인" />
           </Fld>
           <div style={{ flex: 1 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
@@ -1766,12 +1816,33 @@ export default function SimV4() {
             <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, fontFamily: "'DM Sans'" }}>
               거래소 강제 청산가 ($)
             </div>
-            {usedCoins.map(coin => (
-              <div key={coin} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center" }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", width: 40, textAlign: "right", fontFamily: "'IBM Plex Mono'" }}>{coin}</span>
-                <Inp value={coinLiqPrices[coin] || ""} onChange={(v) => setLiqPrice(coin, v)} ph="거래소에서 확인" />
+            {usedCoins.map(coin => {
+              const isRef = calc?.calcRefCoin === coin;
+              const hasManual = !!(coinLiqPrices[coin] && n(coinLiqPrices[coin]) > 0);
+              const autoVal = calc?.autoLiqPrices?.[coin];
+              const hasAuto = !isRef && !hasManual && autoVal != null && autoVal > 0;
+              return (
+                <div key={coin} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center" }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", width: 40, textAlign: "right", fontFamily: "'IBM Plex Mono'" }}>{coin}</span>
+                  {hasAuto ? (
+                    <div style={{
+                      ...S.inp, flex: 1, display: "flex", alignItems: "center", justifyContent: "space-between",
+                      background: "#060a10", borderColor: "#0ea5e922", cursor: "default",
+                    }}>
+                      <span style={{ color: "#0ea5e9", fontSize: 13, fontWeight: 500 }}>{fmt(autoVal, autoVal > 100 ? 2 : 4)}</span>
+                      <span style={{ fontSize: 9, color: "#0ea5e966", fontFamily: "'DM Sans'", whiteSpace: "nowrap", marginLeft: 8 }}>자동</span>
+                    </div>
+                  ) : (
+                    <Inp value={coinLiqPrices[coin] || ""} onChange={(v) => setLiqPrice(coin, v)} ph="거래소에서 확인" />
+                  )}
+                </div>
+              );
+            })}
+            {usedCoins.length > 1 && calc?.mmRate && (
+              <div style={{ fontSize: 9, color: "#0ea5e966", marginTop: 2, fontFamily: "'DM Sans'" }}>
+                💡 {calc.calcRefCoin} 청산가 기준으로 타 코인 자동 계산 (현재가 고정 가정)
               </div>
-            ))}
+            )}
           </div>
           <Fld label="수수료율 (%)">
             <Inp value={feeRate} onChange={setFeeRate} ph="0.04" />
@@ -1793,6 +1864,35 @@ export default function SimV4() {
             cp={getCp(pos.coin)} />
         ))}
         <button onClick={addPos} style={S.addBtn}>+ 포지션 추가</button>
+
+        {/* 온보딩 가이드: 필수값 미입력 시 표시 */}
+        {(!n(wallet) || !positions.some(p => n(p.entryPrice) > 0 && n(p.margin) > 0)) && (
+          <div style={{
+            marginTop: 16, padding: 20, borderRadius: 12,
+            background: "linear-gradient(135deg, #0a0e1a 0%, #080c16 100%)",
+            border: "1px solid #0ea5e922",
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#0ea5e9", fontFamily: "'DM Sans'", marginBottom: 12 }}>
+              📋 시작하기
+            </div>
+            <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.8, fontFamily: "'DM Sans'" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 6 }}>
+                <span style={{ color: !n(wallet) ? "#f59e0b" : "#34d399", fontWeight: 700, minWidth: 16 }}>{!n(wallet) ? "①" : "✓"}</span>
+                <span>거래소에서 <strong style={{ color: "#e2e8f0" }}>지갑 총 잔고</strong>를 확인하고 입력하세요</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 6 }}>
+                <span style={{ color: !positions.some(p => n(p.entryPrice) > 0 && n(p.margin) > 0) ? "#f59e0b" : "#34d399", fontWeight: 700, minWidth: 16 }}>
+                  {!positions.some(p => n(p.entryPrice) > 0 && n(p.margin) > 0) ? "②" : "✓"}
+                </span>
+                <span>포지션의 <strong style={{ color: "#e2e8f0" }}>오픈 균일가</strong>와 <strong style={{ color: "#e2e8f0" }}>마진</strong>을 입력하세요</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                <span style={{ color: "#4b5563", fontWeight: 700, minWidth: 16 }}>③</span>
+                <span style={{ color: "#6b7280" }}>현재가 입력 또는 실시간 연동 후 시뮬레이션이 시작됩니다</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ③ ACCOUNT SUMMARY */}
         {calc && hasAnyPrice && (
@@ -1863,7 +1963,9 @@ export default function SimV4() {
               <div style={S.liqBar}>
                 <div style={S.liqBarInner}>
                   <div>
-                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>강제 청산가</div>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>
+                      강제 청산가 <span style={{ color: "#4b5563" }}>({calc.calcRefCoin})</span>
+                    </div>
                     <div style={{ fontSize: 20, fontWeight: 700, color: "#f59e0b", fontFamily: "'DM Sans'" }}>
                       ${fmt(calc.exLiq)}
                     </div>
@@ -1878,6 +1980,34 @@ export default function SimV4() {
                     </div>
                   </div>
                 </div>
+                {/* 다중 코인 자동계산 청산가 */}
+                {Object.keys(calc.autoLiqPrices).length > 0 && (
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #1e1e2e" }}>
+                    {Object.entries(calc.autoLiqPrices).map(([coin, liq]) => {
+                      const coinCp = getCp(coin);
+                      const dist = coinCp > 0 ? ((coinCp - liq) / coinCp) * 100 : null;
+                      return (
+                        <div key={coin} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", fontFamily: "'IBM Plex Mono'", width: 40 }}>{coin}</span>
+                            <span style={{ fontSize: 14, fontWeight: 600, color: "#f59e0b", fontFamily: "'DM Sans'" }}>
+                              ${fmt(liq, liq > 100 ? 2 : 4)}
+                            </span>
+                            <span style={{ fontSize: 9, color: "#0ea5e966", fontFamily: "'DM Sans'" }}>자동</span>
+                          </div>
+                          {dist != null && (
+                            <span style={{
+                              fontSize: 11, fontWeight: 600, fontFamily: "'DM Sans'",
+                              color: Math.abs(dist) > 50 ? "#34d399" : Math.abs(dist) > 20 ? "#f59e0b" : "#f87171",
+                            }}>
+                              여유 {fmt(Math.abs(dist))}%
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 {/* Visual bar */}
                 {calc.liqDistPct != null && (
                   <div style={S.liqVisual}>
@@ -3620,10 +3750,10 @@ function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyr
       </div>
       <div style={{ ...S.grid2, marginTop: 8 }}>
         <Fld label="오픈 균일가 ($)">
-          <Inp value={pos.entryPrice} onChange={(v) => onUpdate(pos.id, "entryPrice", v)} ph="1952.15" />
+          <Inp value={pos.entryPrice} onChange={(v) => onUpdate(pos.id, "entryPrice", v)} ph="거래소에서 확인" />
         </Fld>
         <Fld label="마진 (USDT)">
-          <Inp value={pos.margin} onChange={(v) => onUpdate(pos.id, "margin", v)} ph="188.28" />
+          <Inp value={pos.margin} onChange={(v) => onUpdate(pos.id, "margin", v)} ph="거래소에서 확인" />
         </Fld>
       </div>
       {ep > 0 && mg > 0 && pnl != null && (
