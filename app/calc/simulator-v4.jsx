@@ -2128,10 +2128,12 @@ export default function SimV4() {
                   <div key={dca.id} style={S.dcaRow}>
                     <div style={S.dcaNum}>{idx + 1}</div>
                     <div style={{ flex: 1 }}>
-                      <Inp value={dca.price} onChange={(v) => updDCA(dca.id, "price", v)} ph="진입 예정가 ($)" />
+                      <PriceInp value={dca.price} onChange={(v) => updDCA(dca.id, "price", v)} ph="진입 예정가 ($)"
+                        cp={selPos ? getCp(selPos.coin) : 0} mode={selPos?.dir === "long" ? "dca-long" : "dca-short"} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <Inp value={dca.margin} onChange={(v) => updDCA(dca.id, "margin", v)} ph="추가 마진 (USDT)" />
+                      {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={(v) => updDCA(dca.id, "margin", v)} />}
                     </div>
                     {dcaEntries.length > 1 && (
                       <button onClick={() => rmDCA(dca.id)} style={S.rmSm}>×</button>
@@ -2149,6 +2151,7 @@ export default function SimV4() {
                   <div style={S.splitPanel}>
                     <Fld label="총 투입 마진 (USDT)">
                       <Inp value={splitTotal} onChange={setSplitTotal} ph="300" />
+                      {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={setSplitTotal} />}
                     </Fld>
 
                     <div style={{ marginTop: 10 }}>
@@ -2157,11 +2160,8 @@ export default function SimV4() {
                         <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
                           <div style={{ ...S.dcaNum, width: 20, height: 20, fontSize: 10 }}>{idx + 1}</div>
                           <div style={{ flex: 1 }}>
-                            <input type="number" value={sp} placeholder={`가격 ${idx + 1}`}
-                              onChange={(e) => updSplitPrice(idx, e.target.value)}
-                              style={{ ...S.inp, fontSize: 12, padding: "7px 10px" }}
-                              onFocus={(e) => (e.target.style.borderColor = "#0ea5e9")}
-                              onBlur={(e) => (e.target.style.borderColor = "#1e1e2e")} />
+                            <PriceInp value={sp} onChange={(v) => updSplitPrice(idx, v)} ph={`가격 ${idx + 1}`}
+                              cp={selPos ? getCp(selPos.coin) : 0} mode={selPos?.dir === "long" ? "dca-long" : "dca-short"} />
                           </div>
                           {splitPrices.length > 2 && (
                             <button onClick={() => rmSplitPrice(idx)} style={{ ...S.rmSm, width: 28, height: 32, fontSize: 14 }}>×</button>
@@ -2169,6 +2169,7 @@ export default function SimV4() {
                         </div>
                       ))}
                       <button onClick={addSplitPrice} style={{ ...S.addBtn, marginTop: 2, fontSize: 11, padding: "6px 0" }}>+ 가격 추가</button>
+                      <SplitAutoGen cp={selPos ? getCp(selPos.coin) : 0} isLong={selPos?.dir === "long"} onGenerate={setSplitPrices} />
                     </div>
 
                     {calc?.splitResult && (
@@ -2254,7 +2255,8 @@ export default function SimV4() {
             {dcaMode === "reverse" && (
               <div style={S.grid2}>
                 <Fld label="물타기 진입 예정가 ($)">
-                  <Inp value={revPrice} onChange={setRevPrice} ph="예: 2700" />
+                  <PriceInp value={revPrice} onChange={setRevPrice} ph="예: 2700"
+                    cp={selPos ? getCp(selPos.coin) : 0} mode={selPos?.dir === "long" ? "dca-long" : "dca-short"} />
                 </Fld>
                 <Fld label="목표 평단가 ($)">
                   <Inp value={revTarget} onChange={setRevTarget} ph="예: 3000" />
@@ -2283,7 +2285,8 @@ export default function SimV4() {
                     <Inp value={closeRatio} onChange={setCloseRatio} ph="50" />
                   </Fld>
                   <Fld label="손절 예정가 ($ · 비워두면 현재가)">
-                    <Inp value={closePrice} onChange={setClosePrice} ph="현재가 기준" />
+                    <PriceInp value={closePrice} onChange={setClosePrice} ph="현재가 기준"
+                      cp={selPos ? getCp(selPos.coin) : 0} mode="close" />
                   </Fld>
                 </div>
               </>
@@ -2366,10 +2369,13 @@ export default function SimV4() {
                         {calc.pyraCounter ? idx + 1 : idx === 0 ? "①" : idx}
                       </div>
                       <div style={{ flex: 1 }}>
-                        <Inp value={entry.price} onChange={(v) => updPyra(entry.id, "price", v)} ph={`${counterDirKr} 진입가 ($)`} />
+                        <PriceInp value={entry.price} onChange={(v) => updPyra(entry.id, "price", v)} ph={`${counterDirKr} 진입가 ($)`}
+                          cp={counterPos ? getCp(counterPos.coin) : 0}
+                          mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor="#f59e0b" />
                       </div>
                       <div style={{ flex: 1 }}>
                         <Inp value={entry.margin} onChange={(v) => updPyra(entry.id, "margin", v)} ph="마진 (USDT)" />
+                        {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={(v) => updPyra(entry.id, "margin", v)} accentColor="#f59e0b" />}
                       </div>
                       {pyraEntries.length > 1 && (
                         <button onClick={() => rmPyra(entry.id)} style={S.rmSm}>×</button>
@@ -2387,6 +2393,7 @@ export default function SimV4() {
                     <div style={{ ...S.splitPanel, borderColor: "#f59e0b22" }}>
                       <Fld label="총 투입 마진 (USDT)">
                         <Inp value={pyraSplitTotal} onChange={setPyraSplitTotal} ph="300" />
+                        {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={setPyraSplitTotal} accentColor="#f59e0b" />}
                       </Fld>
                       <div style={{ marginTop: 10 }}>
                         <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, fontFamily: "'DM Sans'" }}>불타기 가격</div>
@@ -2394,11 +2401,9 @@ export default function SimV4() {
                           <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
                             <div style={{ ...S.dcaNum, width: 20, height: 20, fontSize: 10, background: "#f59e0b15", borderColor: "#f59e0b33", color: "#f59e0b" }}>{idx + 1}</div>
                             <div style={{ flex: 1 }}>
-                              <input type="number" value={sp} placeholder={`가격 ${idx + 1}`}
-                                onChange={(e) => updPyraSplitPrice(idx, e.target.value)}
-                                style={{ ...S.inp, fontSize: 12, padding: "7px 10px" }}
-                                onFocus={(e) => (e.target.style.borderColor = "#f59e0b")}
-                                onBlur={(e) => (e.target.style.borderColor = "#1e1e2e")} />
+                              <PriceInp value={sp} onChange={(v) => updPyraSplitPrice(idx, v)} ph={`가격 ${idx + 1}`}
+                                cp={counterPos ? getCp(counterPos.coin) : 0}
+                                mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor="#f59e0b" />
                             </div>
                             {pyraSplitPrices.length > 2 && (
                               <button onClick={() => rmPyraSplitPrice(idx)} style={{ ...S.rmSm, width: 28, height: 32, fontSize: 14 }}>×</button>
@@ -2406,6 +2411,7 @@ export default function SimV4() {
                           </div>
                         ))}
                         <button onClick={addPyraSplitPrice} style={{ ...S.addBtn, marginTop: 2, fontSize: 11, padding: "6px 0", borderColor: "#f59e0b33", color: "#f59e0b66" }}>+ 가격 추가</button>
+                        <SplitAutoGen cp={counterPos ? getCp(counterPos.coin) : 0} isLong={counter.dir === "long"} onGenerate={setPyraSplitPrices} accentColor="#f59e0b" />
                       </div>
 
                       {calc?.pyraSplitResult && (
@@ -2461,7 +2467,9 @@ export default function SimV4() {
               {pyraSubMode === "reverse" && (
                 <div style={S.grid2}>
                   <Fld label={`${counterDirKr} 불타기 진입 예정가 ($)`}>
-                    <Inp value={pyraRevPrice} onChange={setPyraRevPrice} ph="불타기 진입가" />
+                    <PriceInp value={pyraRevPrice} onChange={setPyraRevPrice} ph="불타기 진입가"
+                      cp={counterPos ? getCp(counterPos.coin) : 0}
+                      mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor="#f59e0b" />
                   </Fld>
                   <Fld label="목표 역전가 ($)">
                     <Inp value={pyraRevTarget} onChange={setPyraRevTarget} ph="이 가격에서 합산PnL=0" />
@@ -3583,6 +3591,16 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
             <SL label="투입 금액" value={`${fmt(r.addTotalRawMargin)} USDT`} />
             <SL label="수수료 예약 (진입+청산)" value={`-${fmt(r.addTotalFeeDeduct)} USDT`} warn />
             <SL label="실제 추가 마진" value={`${fmt(r.addTotalMargin)} USDT`} />
+            {r.dcaList && r.dcaList.length > 1 && (
+              <div style={{ padding: "6px 0 2px", borderBottom: "1px solid #0e0e18" }}>
+                {r.dcaList.map((d, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#4b5563", padding: "2px 0" }}>
+                    <span>#{i + 1} ${fmt(d.price)} · {fmt(d.rawMargin, 0)}</span>
+                    <span style={{ color: "#f59e0b" }}>수수료 {fmt(d.feeDeduct)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </>
         )}
         <SL label="왕복 수수료" value={`${fmt(r.totalFee)} USDT`} />
@@ -3714,6 +3732,113 @@ function Inp({ value, onChange, ph }) {
   );
 }
 
+/* 가격 입력 + 현재가/±% 빠른 버튼 */
+function PriceInp({ value, onChange, ph, cp, mode, accentColor }) {
+  // mode: "dca" = 물타기(평단 유리 방향), "pyra" = 불타기(추세 방향), "close" = 양방향, "entry" = 양방향
+  // accentColor: 버튼 강조색 (기본 #0ea5e9)
+  const ac = accentColor || "#0ea5e9";
+  const hasCp = cp > 0;
+  const pctCalc = (pct) => String(Math.round(cp * (1 + pct / 100) * 100) / 100);
+
+  // 방향별 % 프리셋
+  let pctPresets = [];
+  if (mode === "dca-long") pctPresets = [{ l: "-1%", v: -1 }, { l: "-3%", v: -3 }, { l: "-5%", v: -5 }];
+  else if (mode === "dca-short") pctPresets = [{ l: "+1%", v: 1 }, { l: "+3%", v: 3 }, { l: "+5%", v: 5 }];
+  else if (mode === "pyra-long") pctPresets = [{ l: "+1%", v: 1 }, { l: "+3%", v: 3 }, { l: "+5%", v: 5 }];
+  else if (mode === "pyra-short") pctPresets = [{ l: "-1%", v: -1 }, { l: "-3%", v: -3 }, { l: "-5%", v: -5 }];
+  else pctPresets = [{ l: "-3%", v: -3 }, { l: "-1%", v: -1 }, { l: "+1%", v: 1 }, { l: "+3%", v: 3 }];
+
+  const btnS = { padding: "2px 0", fontSize: 8, fontWeight: 600, borderRadius: 3, cursor: "pointer", border: `1px solid ${ac}22`, background: `${ac}08`, color: `${ac}99`, fontFamily: "'DM Sans'", flex: 1, minWidth: 0, transition: "all 0.12s" };
+
+  return (
+    <div>
+      <input type="number" value={value} placeholder={ph} onChange={(e) => onChange(e.target.value)}
+        style={S.inp}
+        onFocus={(e) => (e.target.style.borderColor = ac)}
+        onBlur={(e) => (e.target.style.borderColor = "#1e1e2e")} />
+      {hasCp && (
+        <div style={{ display: "flex", gap: 2, marginTop: 3 }}>
+          <button onClick={() => onChange(String(cp))} style={{ ...btnS, background: `${ac}15`, color: ac, fontWeight: 700, fontSize: 9 }}>현재가</button>
+          {pctPresets.map((p) => (
+            <button key={p.l} onClick={() => onChange(pctCalc(p.v))} style={btnS}>{p.l}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* 마진 빠른 입력 프리셋 */
+function MarginPresets({ freeMargin, onSelect, accentColor }) {
+  const ac = accentColor || "#0ea5e9";
+  if (!freeMargin || freeMargin <= 0) return null;
+  const presets = [
+    { label: "전액", pct: 100 },
+    { label: "50%", pct: 50 },
+    { label: "25%", pct: 25 },
+    { label: "10%", pct: 10 },
+    { label: "5%", pct: 5 },
+  ];
+  const btnS = { padding: "2px 0", fontSize: 8, fontWeight: 600, borderRadius: 3, cursor: "pointer", border: `1px solid ${ac}22`, background: `${ac}08`, color: `${ac}99`, fontFamily: "'DM Sans'", flex: 1, minWidth: 0, transition: "all 0.12s" };
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 2, marginTop: 3 }}>
+        {presets.map((p) => (
+          <button key={p.pct} onClick={() => onSelect(String(Math.floor(freeMargin * p.pct / 100 * 100) / 100))} style={btnS}>{p.label}</button>
+        ))}
+      </div>
+      <div style={{ fontSize: 8, color: "#4b5563", marginTop: 2, textAlign: "right", fontFamily: "'DM Sans'" }}>
+        여유: {freeMargin.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} USDT
+      </div>
+    </div>
+  );
+}
+
+/* 분할 매수 가격 자동 생성 */
+function SplitAutoGen({ cp, isLong, onGenerate, accentColor }) {
+  const [gap, setGap] = useState("2");
+  const [count, setCount] = useState("3");
+  const ac = accentColor || "#0ea5e9";
+  if (!cp || cp <= 0) return null;
+
+  const generate = () => {
+    const g = Number(gap) || 2;
+    const c = Math.min(Math.max(Number(count) || 3, 2), 10);
+    const sign = isLong ? -1 : 1;
+    const prices = Array.from({ length: c }, (_, i) =>
+      String(Math.round(cp * (1 + sign * (i + 1) * g / 100) * 100) / 100)
+    );
+    onGenerate(prices);
+  };
+
+  const inputS = { ...S.inp, fontSize: 11, padding: "5px 8px", width: "100%" };
+  return (
+    <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: "#06060e", border: `1px solid ${ac}15` }}>
+      <div style={{ fontSize: 10, color: ac, fontWeight: 600, marginBottom: 6, fontFamily: "'DM Sans'" }}>
+        자동 생성 (현재가 ${cp.toLocaleString()} 기준)
+      </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 9, color: "#4b5563", marginBottom: 2 }}>간격 (%)</div>
+          <input type="number" value={gap} onChange={(e) => setGap(e.target.value)} style={inputS} placeholder="2" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 9, color: "#4b5563", marginBottom: 2 }}>개수</div>
+          <input type="number" value={count} onChange={(e) => setCount(e.target.value)} style={inputS} placeholder="3" />
+        </div>
+        <button onClick={generate} style={{
+          padding: "6px 12px", fontSize: 10, fontWeight: 600, borderRadius: 6,
+          border: `1px solid ${ac}44`, background: `${ac}15`, color: ac,
+          cursor: "pointer", fontFamily: "'DM Sans'", whiteSpace: "nowrap",
+        }}>생성</button>
+      </div>
+      <div style={{ fontSize: 8, color: "#4b5563", marginTop: 4, fontFamily: "'DM Sans'" }}>
+        {isLong ? "▼ 현재가 아래로" : "▲ 현재가 위로"} {gap}% 간격 · {count}개
+      </div>
+    </div>
+  );
+}
+
 function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyra, onUpdate, onRemove, canRemove, cp, feeRate: fr }) {
   const [showMoreCoins, setShowMoreCoins] = useState(false);
   const dirC = pos.dir === "long" ? "#34d399" : "#f87171";
@@ -3834,7 +3959,7 @@ function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyr
       </div>
       <div style={{ ...S.grid2, marginTop: 8 }}>
         <Fld label="오픈 균일가 ($)">
-          <Inp value={pos.entryPrice} onChange={(v) => onUpdate(pos.id, "entryPrice", v)} ph="거래소에서 확인" />
+          <PriceInp value={pos.entryPrice} onChange={(v) => onUpdate(pos.id, "entryPrice", v)} ph="거래소에서 확인" cp={cp} mode="entry" />
         </Fld>
         <Fld label="마진 (USDT)">
           <div style={{ display: "flex", gap: 3, marginBottom: 5 }}>
