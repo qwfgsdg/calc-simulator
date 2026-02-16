@@ -22,8 +22,7 @@ const pct = (a, b) => (b !== 0 ? (a / b) * 100 : 0);
    ═══════════════════════════════════════════ */
 const mkPos = (ov = {}) => ({
   id: uid(), dir: "long", coin: "ETH",
-  entryPrice: "", margin: "", leverage: 50, marginMode: "exchange", ...ov,
-  // marginMode: "exchange" = 거래소 마진(수수료 차감 후), "input" = 투입 금액(수수료 차감 전)
+  entryPrice: "", margin: "", leverage: 50, ...ov,
 });
 const mkDCA = () => ({ id: uid(), price: "", margin: "" });
 const mkPyra = () => ({ id: uid(), price: "", margin: "" });
@@ -181,7 +180,7 @@ export default function SimV4() {
         wallet, feeRate, coinLiqPrices, coinPrices,
         positions: positions.map((p) => ({
           id: p.id, dir: p.dir, coin: p.coin,
-          entryPrice: p.entryPrice, margin: p.margin, leverage: p.leverage, marginMode: p.marginMode,
+          entryPrice: p.entryPrice, margin: p.margin, leverage: p.leverage,
         })),
         hcMargin, hcLeverage, hcTakeROE, hcCutRatio, hcRecoveryROE, hcKillPct,
         hcLongEntry, hcShortEntry, hcLongMargin, hcShortMargin, hcCycles,
@@ -381,28 +380,23 @@ export default function SimV4() {
     if (!wb) return null;
 
     // ── Parse positions (코인별 현재가 적용) ──
-    // marginMode: "exchange" = 이미 수수료 차감된 거래소 마진, "input" = 투입 금액 (수수료 차감 전)
+    // 마진 = 거래소에 표시된 값 그대로 (수수료 이미 차감됨)
+    // 수수료 차감은 추가 진입(DCA/불타기) 시에만 적용
     const parsed = positions.map((p) => {
       const ep = n(p.entryPrice);
-      const rawMg = n(p.margin);
+      const mg = n(p.margin);
       const lev = n(p.leverage);
-      // 수수료 모델: 진입 + 청산 예약 수수료를 마진에서 차감
-      const feeDeduction = p.marginMode === "input" ? rawMg * lev * fee * 2 : 0;
-      const mg = p.marginMode === "input" ? rawMg - feeDeduction : rawMg;
-      const inputMg = p.marginMode === "input" ? rawMg : rawMg + rawMg * lev * fee * 2 / (1 - lev * fee * 2);
-      const notional = mg * lev;
+      const notional = mg * lev;           // 진입 시 명목가 (고정)
       const qty = ep > 0 ? notional / ep : 0;
       const sign = p.dir === "long" ? 1 : -1;
       const pcp = n(coinPrices[p.coin] || ""); // 포지션별 현재가
+      const liveNotional = pcp > 0 && qty > 0 ? qty * pcp : notional; // 실시간 포지션 크기
       let pnl = 0, roe = 0;
       if (pcp > 0 && qty > 0) {
         pnl = sign * (pcp - ep) * qty;
         roe = pct(pnl, mg);
       }
-      const entryFee = notional * fee;
-      const reserveFee = notional * fee;
-      const totalFeeEst = entryFee + reserveFee;
-      return { ...p, ep, mg, rawMg, inputMg, feeDeduction, lev, notional, qty, sign, pnl, roe, pcp, entryFee, reserveFee, totalFeeEst };
+      return { ...p, ep, mg, lev, notional, liveNotional, qty, sign, pnl, roe, pcp };
     }).filter((p) => p.ep > 0 && p.mg > 0);
 
     // ── Account summary ──
@@ -3842,16 +3836,14 @@ function SplitAutoGen({ cp, isLong, onGenerate, accentColor }) {
 function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyra, onUpdate, onRemove, canRemove, cp, feeRate: fr }) {
   const [showMoreCoins, setShowMoreCoins] = useState(false);
   const dirC = pos.dir === "long" ? "#34d399" : "#f87171";
-  const ep = n(pos.entryPrice), rawMg = n(pos.margin), lev = n(pos.leverage);
-  const fee = n(fr) / 100;
-  const feeDeduct = pos.marginMode === "input" ? rawMg * lev * fee * 2 : 0;
-  const mg = pos.marginMode === "input" ? rawMg - feeDeduct : rawMg;
+  const ep = n(pos.entryPrice), mg = n(pos.margin), lev = n(pos.leverage);
   const notional = mg * lev;
   const qty = ep > 0 ? notional / ep : 0;
+  const liveNotional = cp > 0 && qty > 0 ? qty * cp : notional;
   const sign = pos.dir === "long" ? 1 : -1;
   const pnl = cp > 0 && qty > 0 ? sign * (cp - ep) * qty : null;
   const roe = pnl != null && mg > 0 ? (pnl / mg) * 100 : null;
-  const isEmpty = ep === 0 && rawMg === 0;
+  const isEmpty = ep === 0 && mg === 0;
 
   const borderColor = isPyraCounter ? "#f59e0b" : isPyraLocked ? "#6b728044" : isSel ? "#0ea5e9" : "#1e1e2e";
   const bgColor = isPyraCounter ? "#120e04" : isPyraLocked ? "#0a0a0e" : isSel ? "#060a14" : "#08080f";
@@ -3962,40 +3954,20 @@ function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyr
           <PriceInp value={pos.entryPrice} onChange={(v) => onUpdate(pos.id, "entryPrice", v)} ph="거래소에서 확인" cp={cp} mode="entry" />
         </Fld>
         <Fld label="마진 (USDT)">
-          <div style={{ display: "flex", gap: 3, marginBottom: 5 }}>
-            {[
-              { id: "exchange", label: "거래소 마진" },
-              { id: "input", label: "투입 금액" },
-            ].map((m) => (
-              <button key={m.id} onClick={() => onUpdate(pos.id, "marginMode", m.id)} style={{
-                flex: 1, padding: "3px 0", fontSize: 9, fontWeight: 600, borderRadius: 4, cursor: "pointer",
-                border: `1px solid ${pos.marginMode === m.id ? "#0ea5e933" : "#1e1e2e"}`,
-                background: pos.marginMode === m.id ? "#0ea5e908" : "transparent",
-                color: pos.marginMode === m.id ? "#0ea5e9" : "#4b5563",
-                fontFamily: "'DM Sans'", transition: "all 0.15s",
-              }}>{m.label}</button>
-            ))}
-          </div>
-          <Inp value={pos.margin} onChange={(v) => onUpdate(pos.id, "margin", v)}
-            ph={pos.marginMode === "input" ? "투입할 금액" : "거래소에서 확인"} />
+          <Inp value={pos.margin} onChange={(v) => onUpdate(pos.id, "margin", v)} ph="거래소에서 확인" />
         </Fld>
       </div>
-      {ep > 0 && rawMg > 0 && (
+      {ep > 0 && mg > 0 && (
         <div style={S.autoRow}>
           {pnl != null && (
             <span style={{ color: pnl >= 0 ? "#34d399" : "#f87171" }}>
               PnL: {fmtS(pnl)} ({fmtS(roe)}%)
             </span>
           )}
-          {pos.marginMode === "input" && feeDeduct > 0 && (
-            <>
-              <span style={{ color: "#f59e0b" }}>수수료: {fmt(feeDeduct)}</span>
-              <span style={{ color: "#94a3b8" }}>실제 마진: {fmt(mg)}</span>
-            </>
-          )}
-          {pos.marginMode === "exchange" && fee > 0 && (
-            <span style={{ color: "#4b5563" }}>포지션: {fmt(notional)}</span>
-          )}
+          <span style={{ color: "#4b5563" }}>
+            포지션: {fmt(liveNotional, 0)}{cp > 0 && liveNotional !== notional ? ` (진입 시 ${fmt(notional, 0)})` : ""}
+          </span>
+          {qty > 0 && <span style={{ color: "#4b5563" }}>수량: {fmt(qty, 4)}</span>}
         </div>
       )}
     </div>
