@@ -5,6 +5,8 @@ import { useState, useCallback, useMemo, useEffect, useRef } from "react";
    ═══════════════════════════════════════════ */
 const uid = () => Math.random().toString(36).slice(2, 9);
 const COINS = ["ETH", "BTC", "SOL", "XRP", "DOGE", "ADA", "AVAX", "LINK"];
+const COINS_PRIMARY = ["ETH", "BTC", "SOL", "XRP"];  // 버튼으로 표시
+const COINS_MORE = ["DOGE", "ADA", "AVAX", "LINK"];   // 더보기
 const LEV_PRESETS = [5, 10, 20, 25, 50, 75, 100, 125];
 
 const n = (v) => Number(v) || 0;
@@ -3679,6 +3681,7 @@ function Inp({ value, onChange, ph }) {
 }
 
 function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyra, onUpdate, onRemove, canRemove, cp }) {
+  const [showMoreCoins, setShowMoreCoins] = useState(false);
   const dirC = pos.dir === "long" ? "#34d399" : "#f87171";
   const ep = n(pos.entryPrice), mg = n(pos.margin), lev = n(pos.leverage);
   const notional = mg * lev;
@@ -3686,9 +3689,20 @@ function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyr
   const sign = pos.dir === "long" ? 1 : -1;
   const pnl = cp > 0 && qty > 0 ? sign * (cp - ep) * qty : null;
   const roe = pnl != null && mg > 0 ? (pnl / mg) * 100 : null;
+  const isEmpty = ep === 0 && mg === 0;
 
   const borderColor = isPyraCounter ? "#f59e0b" : isPyraLocked ? "#6b728044" : isSel ? "#0ea5e9" : "#1e1e2e";
   const bgColor = isPyraCounter ? "#120e04" : isPyraLocked ? "#0a0a0e" : isSel ? "#060a14" : "#08080f";
+
+  const isPrimary = COINS_PRIMARY.includes(pos.coin);
+  const coinBtnStyle = (c) => ({
+    padding: "6px 0", fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: "pointer",
+    border: `1px solid ${pos.coin === c ? "#0ea5e944" : "#1e1e2e"}`,
+    background: pos.coin === c ? "#0ea5e912" : "transparent",
+    color: pos.coin === c ? "#0ea5e9" : "#6b7280",
+    fontFamily: "'IBM Plex Mono'", transition: "all 0.15s",
+    flex: 1, minWidth: 0,
+  });
 
   return (
     <div style={{ ...S.card, borderColor, background: bgColor }}>
@@ -3723,7 +3737,45 @@ function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyr
           {canRemove && <button onClick={onRemove} style={{ ...S.miniBtn, color: "#f87171", borderColor: "#1e1e2e" }}>삭제</button>}
         </div>
       </div>
-      <div style={S.grid3}>
+
+      {/* 코인 선택: 버튼 그룹 */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, color: isEmpty ? "#94a3b8" : "#6b7280", marginBottom: 5, fontFamily: "'DM Sans'", fontWeight: isEmpty ? 600 : 400 }}>
+          {isEmpty ? "코인 선택" : "코인"}
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {COINS_PRIMARY.map((c) => (
+            <button key={c} onClick={() => { onUpdate(pos.id, "coin", c); setShowMoreCoins(false); }} style={coinBtnStyle(c)}>
+              {c}
+            </button>
+          ))}
+          <button
+            onClick={() => setShowMoreCoins(!showMoreCoins)}
+            style={{
+              ...coinBtnStyle("__more__"),
+              flex: "none", width: 40,
+              border: `1px solid ${(!isPrimary || showMoreCoins) ? "#0ea5e944" : "#1e1e2e"}`,
+              background: (!isPrimary || showMoreCoins) ? "#0ea5e912" : "transparent",
+              color: (!isPrimary || showMoreCoins) ? "#0ea5e9" : "#4b5563",
+              fontSize: 10,
+            }}
+          >
+            {!isPrimary ? pos.coin : "···"}
+          </button>
+        </div>
+        {showMoreCoins && (
+          <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+            {COINS_MORE.map((c) => (
+              <button key={c} onClick={() => { onUpdate(pos.id, "coin", c); setShowMoreCoins(false); }} style={coinBtnStyle(c)}>
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 방향 + 레버리지 */}
+      <div style={S.grid2}>
         <Fld label="방향">
           <div style={{ display: "flex", gap: 4 }}>
             {["long", "short"].map((d) => (
@@ -3736,11 +3788,6 @@ function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyr
               }}>{d === "long" ? "롱" : "숏"}</button>
             ))}
           </div>
-        </Fld>
-        <Fld label="코인">
-          <select value={pos.coin} onChange={(e) => onUpdate(pos.id, "coin", e.target.value)} style={S.sel}>
-            {COINS.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
         </Fld>
         <Fld label="레버리지">
           <select value={pos.leverage} onChange={(e) => onUpdate(pos.id, "leverage", Number(e.target.value))} style={S.sel}>
