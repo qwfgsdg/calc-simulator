@@ -112,6 +112,14 @@ export default function SimV4() {
   const [pyraSplitTotal, setPyraSplitTotal] = useState("");
   const [pyraSplitPrices, setPyraSplitPrices] = useState(["", "", ""]);
 
+  // ── 동시청산 계산기 ──
+  const [scCloseRatios, setScCloseRatios] = useState({}); // { ETH: { long: "100", short: "100" } }
+  const [scTargets, setScTargets] = useState({}); // { ETH: "50" }
+  const getScRatio = (coin, dir) => scCloseRatios[coin]?.[dir] || "100";
+  const setScRatio = (coin, dir, val) => setScCloseRatios(prev => ({ ...prev, [coin]: { ...(prev[coin] || {}), [dir]: val } }));
+  const getScTarget = (coin) => scTargets[coin] || "";
+  const setScTarget = (coin, val) => setScTargets(prev => ({ ...prev, [coin]: val }));
+
   // ── 헷지 사이클 전략 ──
   const [appTab, setAppTab] = useState("sim"); // "sim" | "hedge"
   const [hcMargin, setHcMargin] = useState("1000");         // 한쪽 기본 마진
@@ -1464,6 +1472,85 @@ export default function SimV4() {
       }
     }
 
+    // ── 동시청산 계산기 ──
+    const hedgePairs = [];
+    const pairCoins = [...new Set(parsed.map(p => p.coin))];
+    pairCoins.forEach(coin => {
+      const longPos = parsed.find(p => p.coin === coin && p.dir === "long");
+      const shortPos = parsed.find(p => p.coin === coin && p.dir === "short");
+      if (!longPos || !shortPos) return;
+
+      const coinCp = n(coinPrices[coin] || "");
+      if (coinCp <= 0) return;
+
+      const lr = Math.min(Math.max(n(scCloseRatios[coin]?.long || "100") / 100, 0), 1);
+      const sr = Math.min(Math.max(n(scCloseRatios[coin]?.short || "100") / 100, 0), 1);
+      const target = n(scTargets[coin] || "");
+
+      const closeLq = longPos.qty * lr;
+      const closeSq = shortPos.qty * sr;
+      if (closeLq <= 0 && closeSq <= 0) return;
+
+      // 진입 수수료 (이미 지불됨) = 청산되는 수량의 진입 노셔널 × fee
+      const entryFees = (closeLq * longPos.ep + closeSq * shortPos.ep) * fee;
+
+      // P에 대한 1차방정식 분모
+      const denom = closeLq - closeSq - (closeLq + closeSq) * fee;
+
+      // 가격별 계산 함수
+      const longPnLAt = (P) => (P - longPos.ep) * closeLq;
+      const shortPnLAt = (P) => (shortPos.ep - P) * closeSq;
+      const closeFeeAt = (P) => (closeLq + closeSq) * P * fee;
+      const netCloseAt = (P) => longPnLAt(P) + shortPnLAt(P) - closeFeeAt(P);
+      const netAllAt = (P) => netCloseAt(P) - entryFees;
+
+      // 본전가 / 목표가 역산
+      const constTerm = longPos.ep * closeLq - shortPos.ep * closeSq;
+      let breakevenClose = null, breakevenAll = null, targetPrice = null;
+
+      if (Math.abs(denom) > 1e-12) {
+        const beC = constTerm / denom;
+        if (beC > 0) breakevenClose = beC;
+
+        const beA = (constTerm + entryFees) / denom;
+        if (beA > 0) breakevenAll = beA;
+
+        if (target > 0) {
+          const tp = (constTerm + entryFees + target) / denom;
+          if (tp > 0) targetPrice = tp;
+        }
+      }
+
+      // 시나리오 테이블
+      const scenarios = [];
+      [-10, -5, -3, -1, 0, 1, 3, 5, 10].forEach(pv => {
+        const P = coinCp * (1 + pv / 100);
+        scenarios.push({
+          label: pv === 0 ? "현재가" : `${pv > 0 ? "+" : ""}${pv}%`,
+          price: P, longPnL: longPnLAt(P), shortPnL: shortPnLAt(P),
+          closeFee: closeFeeAt(P), netClose: netCloseAt(P), netAll: netAllAt(P),
+          isCurrent: pv === 0,
+        });
+      });
+      if (breakevenAll) scenarios.push({ label: "본전(전체)", price: breakevenAll, longPnL: longPnLAt(breakevenAll), shortPnL: shortPnLAt(breakevenAll), closeFee: closeFeeAt(breakevenAll), netClose: netCloseAt(breakevenAll), netAll: 0, isSpecial: true });
+      if (breakevenClose) scenarios.push({ label: "본전(청산)", price: breakevenClose, longPnL: longPnLAt(breakevenClose), shortPnL: shortPnLAt(breakevenClose), closeFee: closeFeeAt(breakevenClose), netClose: 0, netAll: netAllAt(breakevenClose), isSpecial: true });
+      if (targetPrice) scenarios.push({ label: "목표", price: targetPrice, longPnL: longPnLAt(targetPrice), shortPnL: shortPnLAt(targetPrice), closeFee: closeFeeAt(targetPrice), netClose: netCloseAt(targetPrice), netAll: target, isSpecial: true });
+      scenarios.sort((a, b) => a.price - b.price);
+
+      hedgePairs.push({
+        coin, coinCp, long: longPos, short: shortPos,
+        lr, sr, closeLq, closeSq, entryFees,
+        breakevenAll, breakevenClose, targetPrice,
+        beAllDist: breakevenAll ? ((breakevenAll - coinCp) / coinCp) * 100 : null,
+        beCloseDist: breakevenClose ? ((breakevenClose - coinCp) / coinCp) * 100 : null,
+        targetDist: targetPrice ? ((targetPrice - coinCp) / coinCp) * 100 : null,
+        currentLongPnL: longPnLAt(coinCp), currentShortPnL: shortPnLAt(coinCp),
+        currentCloseFee: closeFeeAt(coinCp),
+        currentNetClose: netCloseAt(coinCp), currentNetAll: netAllAt(coinCp),
+        scenarios, target,
+      });
+    });
+
     return {
       parsed, wb, cp, fee, exLiq, calcRefCoin, autoLiqPrices, solveLiqForCoin,
       totalPnL, equity, totalMargin, freeMargin,
@@ -1471,8 +1558,9 @@ export default function SimV4() {
       sel, dcaResult, revResult, closeResult, splitResult, availCalc,
       pyraResult, pyraRevResult, pyraSplitResult,
       pyraLocked, pyraCounter,
+      hedgePairs,
     };
-  }, [wallet, coinPrices, feeRate, coinLiqPrices, positions, selId, dcaMode, dcaEntries, revPrice, revTarget, targetAvail, closeRatio, closePrice, splitMode, splitTotal, splitPrices, pyraMode, pyraLockedId, pyraCounterId, pyraSubMode, pyraEntries, pyraRevPrice, pyraRevTarget, pyraSplitMode, pyraSplitTotal, pyraSplitPrices]);
+  }, [wallet, coinPrices, feeRate, coinLiqPrices, positions, selId, dcaMode, dcaEntries, revPrice, revTarget, targetAvail, closeRatio, closePrice, splitMode, splitTotal, splitPrices, pyraMode, pyraLockedId, pyraCounterId, pyraSubMode, pyraEntries, pyraRevPrice, pyraRevTarget, pyraSplitMode, pyraSplitTotal, pyraSplitPrices, scCloseRatios, scTargets]);
 
   const selPos = positions.find((p) => p.id === selId);
 
@@ -1907,11 +1995,23 @@ export default function SimV4() {
                 <span style={{ color: !positions.some(p => n(p.entryPrice) > 0 && n(p.margin) > 0) ? "#f59e0b" : "#34d399", fontWeight: 700, minWidth: 16 }}>
                   {!positions.some(p => n(p.entryPrice) > 0 && n(p.margin) > 0) ? "②" : "✓"}
                 </span>
-                <span>포지션의 <strong style={{ color: "#e2e8f0" }}>오픈 균일가</strong>와 <strong style={{ color: "#e2e8f0" }}>마진</strong>을 입력하세요</span>
+                <div>
+                  <span>보유 중인 <strong style={{ color: "#e2e8f0" }}>모든 포지션</strong>의 <strong style={{ color: "#e2e8f0" }}>오픈 균일가</strong>, <strong style={{ color: "#e2e8f0" }}>마진</strong>, <strong style={{ color: "#e2e8f0" }}>레버리지</strong>를 입력하세요</span>
+                  <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>※ 교차 마진에서는 모든 포지션이 청산가에 영향을 줍니다</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 6 }}>
+                <span style={{ color: !Object.values(coinLiqPrices).some(v => n(v) > 0) ? "#f59e0b" : "#34d399", fontWeight: 700, minWidth: 16 }}>
+                  {!Object.values(coinLiqPrices).some(v => n(v) > 0) ? "③" : "✓"}
+                </span>
+                <div>
+                  <span>거래소에 표시된 <strong style={{ color: "#e2e8f0" }}>강제 청산가</strong>를 입력하세요</span>
+                  <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>※ 미입력 시 청산가 예측 기능이 비활성화됩니다</div>
+                </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                <span style={{ color: "#4b5563", fontWeight: 700, minWidth: 16 }}>③</span>
-                <span style={{ color: "#6b7280" }}>현재가 입력 또는 실시간 연동 후 시뮬레이션이 시작됩니다</span>
+                <span style={{ color: hasAnyPrice ? "#34d399" : "#f59e0b", fontWeight: 700, minWidth: 16 }}>{hasAnyPrice ? "✓" : "④"}</span>
+                <span style={{ color: hasAnyPrice ? "#94a3b8" : "#6b7280" }}>현재가에서 <strong style={{ color: hasAnyPrice ? "#94a3b8" : "#e2e8f0" }}>실시간 전환</strong>을 누르거나 직접 입력하면 시뮬레이션이 시작됩니다</span>
               </div>
             </div>
           </div>
@@ -2091,6 +2191,216 @@ export default function SimV4() {
                 </div>
               </div>
             )}
+
+            {/* ⚖ HEDGE CLOSE CALCULATOR */}
+            {calc.hedgePairs && calc.hedgePairs.length > 0 && calc.hedgePairs.map(pair => (
+              <div key={`sc-${pair.coin}`}>
+                {/* Section header */}
+                <div style={{
+                  fontSize: 11, fontWeight: 700, letterSpacing: 2.5, textTransform: "uppercase",
+                  color: "#10b981", fontFamily: "'DM Sans'",
+                  margin: "28px 0 10px", display: "flex", alignItems: "center", gap: 8,
+                }}>
+                  <div style={{ width: 3, height: 14, background: "#10b981", borderRadius: 2 }} />
+                  동시청산 — {pair.coin}
+                </div>
+
+                {/* Position summary + close ratios */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                  {/* Long */}
+                  <div style={{ padding: 12, borderRadius: 10, background: "#08080f", border: "1px solid #34d39933" }}>
+                    <div style={{ fontSize: 10, color: "#34d399", fontWeight: 700, marginBottom: 6, fontFamily: "'DM Sans'" }}>롱</div>
+                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 2 }}>진입 <span style={{ color: "#e2e8f0", fontWeight: 600 }}>${fmt(pair.long.ep, pair.long.ep > 100 ? 2 : 4)}</span></div>
+                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 2 }}>마진 <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{fmt(pair.long.mg)}</span> · {pair.long.lev}x</div>
+                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>수량 <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{fmt(pair.long.qty, 4)}</span></div>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 3 }}>청산 비율 (%)</div>
+                    <input type="number" value={getScRatio(pair.coin, "long")}
+                      onChange={(e) => setScRatio(pair.coin, "long", e.target.value)}
+                      style={{ ...S.inp, fontSize: 13, padding: "8px 10px" }}
+                      onFocus={(e) => (e.target.style.borderColor = "#10b981")}
+                      onBlur={(e) => (e.target.style.borderColor = "#1e1e2e")} />
+                    <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
+                      {[25, 50, 75, 100].map(v => (
+                        <button key={v} onClick={() => setScRatio(pair.coin, "long", String(v))} style={{
+                          flex: 1, padding: "3px 0", fontSize: 9, fontWeight: 600, borderRadius: 4,
+                          cursor: "pointer", fontFamily: "'DM Sans'", transition: "all 0.12s",
+                          border: `1px solid ${getScRatio(pair.coin, "long") === String(v) ? "#10b98166" : "#1e1e2e"}`,
+                          background: getScRatio(pair.coin, "long") === String(v) ? "#10b98115" : "transparent",
+                          color: getScRatio(pair.coin, "long") === String(v) ? "#10b981" : "#4b5563",
+                        }}>{v}%</button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Short */}
+                  <div style={{ padding: 12, borderRadius: 10, background: "#08080f", border: "1px solid #f8717133" }}>
+                    <div style={{ fontSize: 10, color: "#f87171", fontWeight: 700, marginBottom: 6, fontFamily: "'DM Sans'" }}>숏</div>
+                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 2 }}>진입 <span style={{ color: "#e2e8f0", fontWeight: 600 }}>${fmt(pair.short.ep, pair.short.ep > 100 ? 2 : 4)}</span></div>
+                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 2 }}>마진 <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{fmt(pair.short.mg)}</span> · {pair.short.lev}x</div>
+                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>수량 <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{fmt(pair.short.qty, 4)}</span></div>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 3 }}>청산 비율 (%)</div>
+                    <input type="number" value={getScRatio(pair.coin, "short")}
+                      onChange={(e) => setScRatio(pair.coin, "short", e.target.value)}
+                      style={{ ...S.inp, fontSize: 13, padding: "8px 10px" }}
+                      onFocus={(e) => (e.target.style.borderColor = "#10b981")}
+                      onBlur={(e) => (e.target.style.borderColor = "#1e1e2e")} />
+                    <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
+                      {[25, 50, 75, 100].map(v => (
+                        <button key={v} onClick={() => setScRatio(pair.coin, "short", String(v))} style={{
+                          flex: 1, padding: "3px 0", fontSize: 9, fontWeight: 600, borderRadius: 4,
+                          cursor: "pointer", fontFamily: "'DM Sans'", transition: "all 0.12s",
+                          border: `1px solid ${getScRatio(pair.coin, "short") === String(v) ? "#10b98166" : "#1e1e2e"}`,
+                          background: getScRatio(pair.coin, "short") === String(v) ? "#10b98115" : "transparent",
+                          color: getScRatio(pair.coin, "short") === String(v) ? "#10b981" : "#4b5563",
+                        }}>{v}%</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Fee details */}
+                <div style={S.detBox}>
+                  <div style={{ ...S.detTitle, color: "#10b981" }}>수수료 내역</div>
+                  <div style={S.sl}><span style={{ color: "#6b7280" }}>진입 수수료 (이미 지불)</span><span style={{ color: "#f59e0b" }}>{fmt(pair.entryFees)} USDT</span></div>
+                  <div style={S.sl}><span style={{ color: "#6b7280" }}>청산 수수료 (현재가 기준)</span><span style={{ color: "#f59e0b" }}>{fmt(pair.currentCloseFee)} USDT</span></div>
+                  <div style={{ ...S.sl, borderBottom: "none", fontWeight: 600 }}><span style={{ color: "#94a3b8" }}>수수료 합계</span><span style={{ color: "#f59e0b" }}>{fmt(pair.entryFees + pair.currentCloseFee)} USDT</span></div>
+                </div>
+
+                {/* Break-even prices */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                  <div style={{ padding: 14, borderRadius: 10, background: "#10b98108", border: "1px solid #10b98133", textAlign: "center" }}>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>본전가 (전체 수수료)</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "#10b981", fontFamily: "'DM Sans'" }}>
+                      {pair.breakevenAll ? `$${fmt(pair.breakevenAll, pair.breakevenAll > 100 ? 2 : 4)}` : "—"}
+                    </div>
+                    {pair.beAllDist != null && (
+                      <div style={{ fontSize: 11, color: pair.beAllDist >= 0 ? "#34d399" : "#f87171", marginTop: 2 }}>
+                        현재가 대비 {fmtS(pair.beAllDist)}%
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ padding: 14, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e", textAlign: "center" }}>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>본전가 (청산 수수료만)</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "#94a3b8", fontFamily: "'DM Sans'" }}>
+                      {pair.breakevenClose ? `$${fmt(pair.breakevenClose, pair.breakevenClose > 100 ? 2 : 4)}` : "—"}
+                    </div>
+                    {pair.beCloseDist != null && (
+                      <div style={{ fontSize: 11, color: pair.beCloseDist >= 0 ? "#34d399" : "#f87171", marginTop: 2 }}>
+                        현재가 대비 {fmtS(pair.beCloseDist)}%
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Current price summary */}
+                <div style={{ padding: 14, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e", marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, fontFamily: "'DM Sans'" }}>
+                    현재가 ${fmt(pair.coinCp, pair.coinCp > 100 ? 2 : 4)} 에서 동시 청산 시
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
+                    <div>
+                      <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 2 }}>롱 PnL</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: pair.currentLongPnL >= 0 ? "#34d399" : "#f87171", fontFamily: "'IBM Plex Mono'" }}>
+                        {fmtS(pair.currentLongPnL)}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 2 }}>숏 PnL</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: pair.currentShortPnL >= 0 ? "#34d399" : "#f87171", fontFamily: "'IBM Plex Mono'" }}>
+                        {fmtS(pair.currentShortPnL)}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 2 }}>수수료</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#f59e0b", fontFamily: "'IBM Plex Mono'" }}>
+                        -{fmt(pair.entryFees + pair.currentCloseFee)}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 2 }}>순손익</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: pair.currentNetAll >= 0 ? "#34d399" : "#f87171", fontFamily: "'IBM Plex Mono'" }}>
+                        {fmtS(pair.currentNetAll)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Target profit */}
+                <div style={{ padding: 14, borderRadius: 10, background: "#08080f", border: "1px solid #10b98122", marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: "#10b981", fontWeight: 700, letterSpacing: 2, marginBottom: 8, fontFamily: "'DM Sans'" }}>목표 익절</div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>목표 금액 (USDT)</div>
+                      <input type="number" value={getScTarget(pair.coin)}
+                        onChange={(e) => setScTarget(pair.coin, e.target.value)}
+                        placeholder="0"
+                        style={{ ...S.inp, fontSize: 13, padding: "8px 10px" }}
+                        onFocus={(e) => (e.target.style.borderColor = "#10b981")}
+                        onBlur={(e) => (e.target.style.borderColor = "#1e1e2e")} />
+                    </div>
+                    <div style={{ flex: 1, paddingLeft: 4, display: "flex", alignItems: "flex-end" }}>
+                      {pair.targetPrice ? (
+                        <div style={{ paddingBottom: 2 }}>
+                          <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>익절가</div>
+                          <div style={{ fontSize: 18, fontWeight: 700, color: "#10b981", fontFamily: "'DM Sans'" }}>
+                            ${fmt(pair.targetPrice, pair.targetPrice > 100 ? 2 : 4)}
+                          </div>
+                          <div style={{ fontSize: 11, color: pair.targetDist >= 0 ? "#34d399" : "#f87171", marginTop: 1 }}>
+                            현재가 대비 {fmtS(pair.targetDist)}%
+                          </div>
+                        </div>
+                      ) : pair.target > 0 ? (
+                        <div style={{ fontSize: 11, color: "#f87171", paddingBottom: 10 }}>도달 불가</div>
+                      ) : (
+                        <div style={{ fontSize: 11, color: "#333", paddingBottom: 10 }}>금액 입력 시 익절가 표시</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Scenario table */}
+                <div style={S.tblWrap}>
+                  <table style={S.tbl}>
+                    <thead>
+                      <tr>
+                        <th style={S.th}>가격</th>
+                        <th style={{ ...S.th, textAlign: "right" }}>롱 PnL</th>
+                        <th style={{ ...S.th, textAlign: "right" }}>숏 PnL</th>
+                        <th style={{ ...S.th, textAlign: "right" }}>수수료</th>
+                        <th style={{ ...S.th, textAlign: "right" }}>순손익</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pair.scenarios.map((s, i) => (
+                        <tr key={i} style={{
+                          background: s.isSpecial ? "#10b98108" : s.isCurrent ? "#0ea5e908" : "transparent",
+                        }}>
+                          <td style={{ ...S.td, fontWeight: s.isSpecial || s.isCurrent ? 600 : 400 }}>
+                            <div style={{ fontSize: 12, color: s.isSpecial ? "#10b981" : s.isCurrent ? "#0ea5e9" : "#e2e8f0" }}>
+                              ${fmt(s.price, s.price > 100 ? 2 : 4)}
+                            </div>
+                            <div style={{ fontSize: 9, color: s.isSpecial ? "#10b981" : s.isCurrent ? "#0ea5e9" : "#4b5563" }}>
+                              {s.label}
+                            </div>
+                          </td>
+                          <td style={{ ...S.td, textAlign: "right", color: s.longPnL >= 0 ? "#34d399" : "#f87171" }}>
+                            {fmtS(s.longPnL)}
+                          </td>
+                          <td style={{ ...S.td, textAlign: "right", color: s.shortPnL >= 0 ? "#34d399" : "#f87171" }}>
+                            {fmtS(s.shortPnL)}
+                          </td>
+                          <td style={{ ...S.td, textAlign: "right", color: "#f59e0b" }}>
+                            -{fmt(s.closeFee + pair.entryFees)}
+                          </td>
+                          <td style={{ ...S.td, textAlign: "right", fontWeight: 600, color: s.netAll >= 0 ? "#34d399" : "#f87171" }}>
+                            {fmtS(s.netAll)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
           </>
         )}
 
