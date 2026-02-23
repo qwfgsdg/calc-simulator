@@ -63,9 +63,31 @@ const mkDCA = () => ({ id: uid(), price: "", margin: "" });
 const mkPyra = () => ({ id: uid(), price: "", margin: "" });
 
 /* ═══════════════════════════════════════════
-   PERSISTENT STORAGE
+   PERSISTENT STORAGE (MULTI-PROFILE)
    ═══════════════════════════════════════════ */
-const STORAGE_KEY = "simv4-data";
+const STORAGE_KEY_LEGACY = "simv4-data";
+const STORAGE_KEY_PROFILES = "simv4-profiles";
+const STORAGE_KEY_ACTIVE = "simv4-active-profile";
+const profileDataKey = (id) => `simv4-data-${id}`;
+
+const PROFILE_COLORS = [
+  { id: "emerald", hex: "#34d399", label: "에메랄드" },
+  { id: "sky",     hex: "#0ea5e9", label: "스카이" },
+  { id: "violet",  hex: "#a78bfa", label: "바이올렛" },
+  { id: "amber",   hex: "#f59e0b", label: "앰버" },
+  { id: "rose",    hex: "#f87171", label: "로즈" },
+  { id: "pink",    hex: "#ec4899", label: "핑크" },
+  { id: "lime",    hex: "#84cc16", label: "라임" },
+  { id: "cyan",    hex: "#22d3ee", label: "시안" },
+];
+
+const mkProfile = (name = "기본 프로필", colorId = "emerald") => ({
+  id: uid(),
+  name,
+  colorId,
+  createdAt: Date.now(),
+  lastUsed: Date.now(),
+});
 
 const storageAdapter = {
   async save(key, data) {
@@ -180,42 +202,103 @@ export default function SimV4() {
   const [dataLoaded, setDataLoaded] = useState(false);
   const saveTimer = useRef(null);
 
-  // 마운트 시 저장된 데이터 복원
+  // ── 멀티 프로필 시스템 ──
+  const [profiles, setProfiles] = useState([]);
+  const [activeProfileId, setActiveProfileId] = useState(null);
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [profileModal, setProfileModal] = useState(null); // null | "create" | "rename"
+  const [profileModalName, setProfileModalName] = useState("");
+  const [profileModalColor, setProfileModalColor] = useState("emerald");
+  const profileDropdownRef = useRef(null);
+  const activeProfile = profiles.find(p => p.id === activeProfileId);
+  const activeColor = PROFILE_COLORS.find(c => c.id === (activeProfile?.colorId || "emerald"))?.hex || "#34d399";
+
+  // ── 프로필 데이터를 state에 적용하는 헬퍼 ──
+  const applyProfileData = (data) => {
+    if (!data) return;
+    if (data.wallet != null) setWallet(data.wallet);
+    if (data.feeRate != null) setFeeRate(data.feeRate);
+    if (data.coinLiqPrices) setCoinLiqPrices(data.coinLiqPrices);
+    else if (data.exLiqPrice != null) setCoinLiqPrices({ ETH: data.exLiqPrice });
+    if (data.coinPrices) setCoinPrices(data.coinPrices);
+    else if (data.priceCoin) setCoinPrices({});
+    if (data.positions && data.positions.length > 0) {
+      setPositions(data.positions.map((p) => ({ ...mkPos(), ...p, id: p.id || uid() })));
+    } else {
+      setPositions([mkPos()]);
+    }
+    if (data.hcMargin != null) setHcMargin(data.hcMargin);
+    if (data.hcLeverage != null) setHcLeverage(data.hcLeverage);
+    if (data.hcTakeROE != null) setHcTakeROE(data.hcTakeROE);
+    if (data.hcCutRatio != null) setHcCutRatio(data.hcCutRatio);
+    if (data.hcRecoveryROE != null) setHcRecoveryROE(data.hcRecoveryROE);
+    if (data.hcKillPct != null) setHcKillPct(data.hcKillPct);
+    if (data.hcLongEntry != null) setHcLongEntry(data.hcLongEntry);
+    if (data.hcShortEntry != null) setHcShortEntry(data.hcShortEntry);
+    if (data.hcLongMargin != null) setHcLongMargin(data.hcLongMargin);
+    if (data.hcShortMargin != null) setHcShortMargin(data.hcShortMargin);
+    if (data.hcCycles) setHcCycles(data.hcCycles);
+  };
+
+  const resetToDefaults = () => {
+    setWallet(""); setFeeRate("0.04"); setCoinLiqPrices({}); setCoinPrices({});
+    setPositions([mkPos()]); setSelId(null); setPyraMode(false);
+    setHcMargin("1000"); setHcLeverage("100"); setHcTakeROE("40");
+    setHcCutRatio("50"); setHcRecoveryROE("0"); setHcKillPct("15");
+    setHcLongEntry(""); setHcShortEntry(""); setHcLongMargin("");
+    setHcShortMargin(""); setHcCycles([]);
+  };
+
+  // ── 마운트 시 프로필 시스템 초기화 ──
   useEffect(() => {
     (async () => {
-      const data = await storageAdapter.load(STORAGE_KEY);
-      if (data) {
-        if (data.wallet != null) setWallet(data.wallet);
-        if (data.feeRate != null) setFeeRate(data.feeRate);
-        if (data.coinLiqPrices) setCoinLiqPrices(data.coinLiqPrices);
-        // 하위 호환: 이전 저장에 exLiqPrice(단일)이 있으면 마이그레이션
-        else if (data.exLiqPrice != null) setCoinLiqPrices({ ETH: data.exLiqPrice });
-        if (data.coinPrices) setCoinPrices(data.coinPrices);
-        // 하위 호환: 이전 저장 데이터에 priceCoin이 있으면 마이그레이션
-        else if (data.priceCoin) setCoinPrices({});
-        if (data.positions && data.positions.length > 0) {
-          setPositions(data.positions.map((p) => ({ ...mkPos(), ...p, id: p.id || uid() })));
+      let loadedProfiles = await storageAdapter.load(STORAGE_KEY_PROFILES);
+      let targetId = null;
+
+      if (!loadedProfiles || loadedProfiles.length === 0) {
+        // 레거시 데이터 마이그레이션 체크
+        const legacyData = await storageAdapter.load(STORAGE_KEY_LEGACY);
+        const defaultProfile = mkProfile("기본 프로필", "emerald");
+        loadedProfiles = [defaultProfile];
+
+        if (legacyData) {
+          // 기존 단일 저장 데이터를 첫 프로필로 마이그레이션
+          await storageAdapter.save(profileDataKey(defaultProfile.id), legacyData);
+          await storageAdapter.clear(STORAGE_KEY_LEGACY);
         }
-        // 헷지 사이클
-        if (data.hcMargin != null) setHcMargin(data.hcMargin);
-        if (data.hcLeverage != null) setHcLeverage(data.hcLeverage);
-        if (data.hcTakeROE != null) setHcTakeROE(data.hcTakeROE);
-        if (data.hcCutRatio != null) setHcCutRatio(data.hcCutRatio);
-        if (data.hcRecoveryROE != null) setHcRecoveryROE(data.hcRecoveryROE);
-        if (data.hcKillPct != null) setHcKillPct(data.hcKillPct);
-        if (data.hcLongEntry != null) setHcLongEntry(data.hcLongEntry);
-        if (data.hcShortEntry != null) setHcShortEntry(data.hcShortEntry);
-        if (data.hcLongMargin != null) setHcLongMargin(data.hcLongMargin);
-        if (data.hcShortMargin != null) setHcShortMargin(data.hcShortMargin);
-        if (data.hcCycles) setHcCycles(data.hcCycles);
+        await storageAdapter.save(STORAGE_KEY_PROFILES, loadedProfiles);
+        targetId = defaultProfile.id;
+      } else {
+        // 최근 사용 프로필 자동 선택
+        const savedActiveId = await storageAdapter.load(STORAGE_KEY_ACTIVE);
+        const lastUsedProfile = [...loadedProfiles].sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0))[0];
+        targetId = savedActiveId && loadedProfiles.find(p => p.id === savedActiveId)
+          ? savedActiveId
+          : lastUsedProfile?.id || loadedProfiles[0].id;
       }
+
+      setProfiles(loadedProfiles);
+      setActiveProfileId(targetId);
+
+      // 활성 프로필 데이터 로드
+      const data = await storageAdapter.load(profileDataKey(targetId));
+      if (data) applyProfileData(data);
+
+      // lastUsed 업데이트
+      const updatedProfiles = loadedProfiles.map(p =>
+        p.id === targetId ? { ...p, lastUsed: Date.now() } : p
+      );
+      setProfiles(updatedProfiles);
+      await storageAdapter.save(STORAGE_KEY_PROFILES, updatedProfiles);
+      await storageAdapter.save(STORAGE_KEY_ACTIVE, targetId);
+
       setDataLoaded(true);
     })();
   }, []);
 
-  // A등급 데이터 변경 시 1초 debounce 자동 저장
+  // A등급 데이터 변경 시 1초 debounce 자동 저장 (활성 프로필에)
   useEffect(() => {
-    if (!dataLoaded) return;
+    if (!dataLoaded || !activeProfileId) return;
     clearTimeout(saveTimer.current);
     setSaveStatus("saving");
     saveTimer.current = setTimeout(async () => {
@@ -228,26 +311,98 @@ export default function SimV4() {
         hcMargin, hcLeverage, hcTakeROE, hcCutRatio, hcRecoveryROE, hcKillPct,
         hcLongEntry, hcShortEntry, hcLongMargin, hcShortMargin, hcCycles,
       };
-      const ok = await storageAdapter.save(STORAGE_KEY, data);
+      const ok = await storageAdapter.save(profileDataKey(activeProfileId), data);
       setSaveStatus(ok ? "saved" : null);
     }, 1000);
-  }, [wallet, feeRate, coinLiqPrices, coinPrices, positions, dataLoaded,
+  }, [wallet, feeRate, coinLiqPrices, coinPrices, positions, dataLoaded, activeProfileId,
       hcMargin, hcLeverage, hcTakeROE, hcCutRatio, hcRecoveryROE, hcKillPct,
       hcLongEntry, hcShortEntry, hcLongMargin, hcShortMargin, hcCycles]);
 
   const handleReset = async () => {
-    if (!confirm("모든 저장 데이터를 삭제하고 초기값으로 복원할까요?")) return;
-    await storageAdapter.clear(STORAGE_KEY);
-    setWallet("");
-    setFeeRate("0.04");
-    setCoinLiqPrices({});
-    setCoinPrices({});
-    setPositions([
-      mkPos(),
-    ]);
-    setSelId(null); setPyraMode(false);
+    if (!confirm(`"${activeProfile?.name || "프로필"}"의 데이터를 초기화할까요?`)) return;
+    if (activeProfileId) await storageAdapter.clear(profileDataKey(activeProfileId));
+    resetToDefaults();
     setSaveStatus(null);
   };
+
+  // ── 프로필 전환 ──
+  const switchProfile = async (targetId) => {
+    if (targetId === activeProfileId) return;
+    // 현재 프로필 저장 (flush)
+    clearTimeout(saveTimer.current);
+    if (activeProfileId) {
+      const curData = {
+        wallet, feeRate, coinLiqPrices, coinPrices,
+        positions: positions.map((p) => ({
+          id: p.id, dir: p.dir, coin: p.coin,
+          entryPrice: p.entryPrice, margin: p.margin, leverage: p.leverage,
+        })),
+        hcMargin, hcLeverage, hcTakeROE, hcCutRatio, hcRecoveryROE, hcKillPct,
+        hcLongEntry, hcShortEntry, hcLongMargin, hcShortMargin, hcCycles,
+      };
+      await storageAdapter.save(profileDataKey(activeProfileId), curData);
+    }
+    // 대상 프로필 데이터 로드
+    resetToDefaults();
+    const data = await storageAdapter.load(profileDataKey(targetId));
+    if (data) applyProfileData(data);
+
+    // lastUsed 갱신
+    const updatedProfiles = profiles.map(p =>
+      p.id === targetId ? { ...p, lastUsed: Date.now() } : p
+    );
+    setProfiles(updatedProfiles);
+    setActiveProfileId(targetId);
+    await storageAdapter.save(STORAGE_KEY_PROFILES, updatedProfiles);
+    await storageAdapter.save(STORAGE_KEY_ACTIVE, targetId);
+    setProfileDropdownOpen(false);
+    setSelId(null); setPyraMode(false);
+  };
+
+  // ── 프로필 생성 ──
+  const createProfile = async (name, colorId) => {
+    const newP = mkProfile(name || `프로필 ${profiles.length + 1}`, colorId || "emerald");
+    const updatedProfiles = [...profiles, newP];
+    setProfiles(updatedProfiles);
+    await storageAdapter.save(STORAGE_KEY_PROFILES, updatedProfiles);
+    // 생성 후 바로 전환
+    await switchProfile(newP.id);
+  };
+
+  // ── 프로필 이름/색상 변경 ──
+  const renameProfile = async (id, newName, newColorId) => {
+    const updatedProfiles = profiles.map(p =>
+      p.id === id ? { ...p, name: newName || p.name, colorId: newColorId ?? p.colorId } : p
+    );
+    setProfiles(updatedProfiles);
+    await storageAdapter.save(STORAGE_KEY_PROFILES, updatedProfiles);
+  };
+
+  // ── 프로필 삭제 ──
+  const deleteProfile = async (id) => {
+    if (profiles.length <= 1) { alert("최소 1개 프로필은 유지해야 합니다."); return; }
+    if (!confirm(`"${profiles.find(p => p.id === id)?.name}"을(를) 삭제할까요?`)) return;
+    await storageAdapter.clear(profileDataKey(id));
+    const remaining = profiles.filter(p => p.id !== id);
+    setProfiles(remaining);
+    await storageAdapter.save(STORAGE_KEY_PROFILES, remaining);
+    if (activeProfileId === id) {
+      const next = [...remaining].sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0))[0];
+      await switchProfile(next.id);
+    }
+  };
+
+  // ── 드롭다운 외부 클릭 닫기 ──
+  useEffect(() => {
+    if (!profileDropdownOpen) return;
+    const handler = (e) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target)) {
+        setProfileDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [profileDropdownOpen]);
 
   // ── 실시간 가격 fetch (다중 코인 · 적응형 주기) ──
   const intervalRef = useRef(null);
@@ -1838,7 +1993,7 @@ export default function SimV4() {
         {/* HEADER */}
         <header style={S.hdr}>
           <div style={S.hdrRow}>
-            <div style={S.hdrDot} />
+            <div style={{ ...S.hdrDot, background: activeColor, boxShadow: `0 0 8px ${activeColor}44` }} />
             <span style={S.hdrBadge}>CROSS MARGIN · FUTURES</span>
           </div>
           <h1 style={S.hdrTitle}>물타기 · 불타기 시뮬레이터</h1>
@@ -1859,12 +2014,212 @@ export default function SimV4() {
                 fontSize: 9, padding: "3px 8px", borderRadius: 4,
                 border: "1px solid #1e1e2e", background: "transparent",
                 color: "#4b5563", cursor: "pointer", fontFamily: "'DM Sans'",
-              }} title="저장 데이터 삭제 및 초기화">
+              }} title="현재 프로필 데이터 초기화">
                 초기화
               </button>
             </div>
           </div>
         </header>
+
+        {/* ══════ PROFILE SELECTOR BAR ══════ */}
+        <div ref={profileDropdownRef} style={{
+          position: "relative", marginBottom: 16,
+          padding: "10px 14px", borderRadius: 10,
+          background: "#08080f", border: `1px solid ${activeColor}33`,
+          fontFamily: "'DM Sans'",
+        }}>
+          {/* 상단: 셀렉터 + 액션 버튼 */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {/* 프로필 선택 버튼 */}
+            <button
+              onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
+              style={{
+                flex: 1, display: "flex", alignItems: "center", gap: 8,
+                padding: "8px 12px", borderRadius: 8,
+                background: profileDropdownOpen ? "#0a0a18" : "transparent",
+                border: `1px solid ${profileDropdownOpen ? activeColor + "44" : "#1e1e2e"}`,
+                cursor: "pointer", transition: "all 0.15s",
+              }}
+            >
+              <div style={{
+                width: 8, height: 8, borderRadius: "50%",
+                background: activeColor, boxShadow: `0 0 6px ${activeColor}66`,
+                flexShrink: 0,
+              }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", textAlign: "left", flex: 1 }}>
+                {activeProfile?.name || "프로필 선택"}
+              </span>
+              <span style={{ fontSize: 10, color: "#4b5563", transform: profileDropdownOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▼</span>
+            </button>
+            {/* 새 프로필 */}
+            <button
+              onClick={() => {
+                setProfileModalName("");
+                setProfileModalColor(PROFILE_COLORS[(profiles.length) % PROFILE_COLORS.length].id);
+                setProfileModal("create");
+                setProfileDropdownOpen(false);
+              }}
+              style={{
+                padding: "8px 12px", fontSize: 11, fontWeight: 600, borderRadius: 8,
+                border: "1px solid #1e1e2e", background: "transparent",
+                color: "#0ea5e9", cursor: "pointer", whiteSpace: "nowrap",
+              }}
+            >＋ 새 프로필</button>
+          </div>
+
+          {/* 드롭다운 목록 */}
+          {profileDropdownOpen && profiles.length > 0 && (
+            <div style={{
+              position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100,
+              marginTop: 4, padding: 6, borderRadius: 10,
+              background: "#0c0c16", border: "1px solid #1e1e2e",
+              boxShadow: "0 12px 40px #00000088",
+              maxHeight: 320, overflowY: "auto",
+            }}>
+              {[...profiles].sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0)).map((p) => {
+                const pColor = PROFILE_COLORS.find(c => c.id === p.colorId)?.hex || "#34d399";
+                const isActive = p.id === activeProfileId;
+                return (
+                  <div key={p.id} style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "10px 12px", borderRadius: 8, cursor: "pointer",
+                    background: isActive ? `${pColor}12` : "transparent",
+                    border: isActive ? `1px solid ${pColor}33` : "1px solid transparent",
+                    marginBottom: 2, transition: "all 0.15s",
+                  }}
+                    onClick={() => !isActive && switchProfile(p.id)}
+                    onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "#ffffff06"; }}
+                    onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <div style={{
+                      width: 8, height: 8, borderRadius: "50%",
+                      background: pColor, boxShadow: `0 0 6px ${pColor}44`,
+                      flexShrink: 0,
+                    }} />
+                    <span style={{ flex: 1, fontSize: 12, fontWeight: isActive ? 600 : 400, color: isActive ? "#f1f5f9" : "#94a3b8" }}>
+                      {p.name}
+                    </span>
+                    {isActive && <span style={{ fontSize: 9, color: pColor, fontWeight: 600 }}>활성</span>}
+                    {/* 편집/삭제 버튼 */}
+                    <button onClick={(e) => {
+                      e.stopPropagation();
+                      setProfileModalName(p.name);
+                      setProfileModalColor(p.colorId || "emerald");
+                      setProfileModal("rename-" + p.id);
+                      setProfileDropdownOpen(false);
+                    }} style={{
+                      padding: "2px 6px", fontSize: 10, border: "1px solid #1e1e2e",
+                      borderRadius: 4, background: "transparent", color: "#6b7280",
+                      cursor: "pointer",
+                    }}>✏️</button>
+                    {profiles.length > 1 && (
+                      <button onClick={(e) => {
+                        e.stopPropagation();
+                        setProfileDropdownOpen(false);
+                        deleteProfile(p.id);
+                      }} style={{
+                        padding: "2px 6px", fontSize: 10, border: "1px solid #1e1e2e",
+                        borderRadius: 4, background: "transparent", color: "#f87171",
+                        cursor: "pointer",
+                      }}>🗑</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 프로필 생성/편집 모달 */}
+          {profileModal && (
+            <div style={{
+              position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+              background: "#000000aa", zIndex: 200,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: 20,
+            }} onClick={() => setProfileModal(null)}>
+              <div style={{
+                width: "100%", maxWidth: 360, padding: 24, borderRadius: 14,
+                background: "#0c0c16", border: "1px solid #1e1e2e",
+                boxShadow: "0 20px 60px #000000cc",
+                fontFamily: "'DM Sans'",
+              }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#f1f5f9", marginBottom: 16 }}>
+                  {profileModal === "create" ? "새 프로필 만들기" : "프로필 편집"}
+                </div>
+                {/* 이름 입력 */}
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>프로필 이름</div>
+                  <input
+                    type="text" value={profileModalName}
+                    onChange={(e) => setProfileModalName(e.target.value)}
+                    placeholder="예: 김민수 ETH 물타기"
+                    maxLength={30}
+                    style={{
+                      ...S.inp, fontSize: 13,
+                    }}
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        if (profileModal === "create") {
+                          createProfile(profileModalName.trim(), profileModalColor);
+                        } else {
+                          const pid = profileModal.replace("rename-", "");
+                          renameProfile(pid, profileModalName.trim(), profileModalColor);
+                        }
+                        setProfileModal(null);
+                      }
+                    }}
+                  />
+                </div>
+                {/* 색상 선택 */}
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>색상 태그</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {PROFILE_COLORS.map((c) => (
+                      <button key={c.id} onClick={() => setProfileModalColor(c.id)} style={{
+                        width: 32, height: 32, borderRadius: 8,
+                        background: profileModalColor === c.id ? `${c.hex}22` : "transparent",
+                        border: `2px solid ${profileModalColor === c.id ? c.hex : "#1e1e2e"}`,
+                        cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                        transition: "all 0.15s",
+                      }}>
+                        <div style={{
+                          width: 14, height: 14, borderRadius: "50%",
+                          background: c.hex,
+                          boxShadow: profileModalColor === c.id ? `0 0 8px ${c.hex}66` : "none",
+                        }} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* 액션 버튼 */}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => setProfileModal(null)} style={{
+                    flex: 1, padding: "10px 0", fontSize: 12, fontWeight: 600,
+                    borderRadius: 8, border: "1px solid #1e1e2e", background: "transparent",
+                    color: "#6b7280", cursor: "pointer",
+                  }}>취소</button>
+                  <button onClick={() => {
+                    const name = profileModalName.trim();
+                    if (profileModal === "create") {
+                      createProfile(name, profileModalColor);
+                    } else {
+                      const pid = profileModal.replace("rename-", "");
+                      renameProfile(pid, name, profileModalColor);
+                    }
+                    setProfileModal(null);
+                  }} style={{
+                    flex: 1, padding: "10px 0", fontSize: 12, fontWeight: 600,
+                    borderRadius: 8, border: `1px solid ${PROFILE_COLORS.find(c => c.id === profileModalColor)?.hex || "#34d399"}44`,
+                    background: `${PROFILE_COLORS.find(c => c.id === profileModalColor)?.hex || "#34d399"}15`,
+                    color: PROFILE_COLORS.find(c => c.id === profileModalColor)?.hex || "#34d399",
+                    cursor: "pointer",
+                  }}>{profileModal === "create" ? "생성" : "저장"}</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* TAB NAVIGATION */}
         <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
