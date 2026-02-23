@@ -17,6 +17,41 @@ const fmt = (v, d = 2) =>
 const fmtS = (v, d = 2) => (v >= 0 ? "+" : "") + fmt(v, d);
 const pct = (a, b) => (b !== 0 ? (a / b) * 100 : 0);
 
+// ── 투입금액 ↔ 표시마진 변환 (Tapbit USDT 무기한) ──
+const COIN_QTY_STEPS = {
+  BTC: 0.001, ETH: 0.01, SOL: 0.1, XRP: 1,
+  DOGE: 1, ADA: 1, AVAX: 0.1, LINK: 0.1,
+};
+
+function fromInput(input, entry, lev, fee, dir, coin) {
+  if (!input || !entry || !lev) return null;
+  const step = COIN_QTY_STEPS[coin] || 0.001;
+  const bkPrice = dir === "long"
+    ? entry * (lev - 1) / lev
+    : entry * (lev + 1) / lev;
+  const costPerQty = entry / lev + entry * fee + bkPrice * fee;
+  if (costPerQty <= 0) return null;
+  const rawQty = input / costPerQty;
+  const qty = Math.floor(rawQty / step) * step;
+  if (qty <= 0) return null;
+  const size = qty * entry;
+  const margin = size / lev;
+  const openCost = size * fee;
+  const closeCost = qty * bkPrice * fee;
+  return { margin, qty, size, openCost, closeCost,
+           total: margin + openCost + closeCost,
+           change: input - (margin + openCost + closeCost), bkPrice };
+}
+
+function fromDisplay(margin, entry, lev, fee, dir) {
+  if (!margin || !entry || !lev) return margin;
+  const qty = margin * lev / entry;
+  const bkPrice = dir === "long"
+    ? entry * (lev - 1) / lev
+    : entry * (lev + 1) / lev;
+  return margin + qty * entry * fee + qty * bkPrice * fee;
+}
+
 /* ═══════════════════════════════════════════
    DATA FACTORIES
    ═══════════════════════════════════════════ */
@@ -527,13 +562,11 @@ export default function SimV4() {
         .map((e) => {
           const price = n(e.price);
           const rawMargin = n(e.margin);
-          // DCA 추가 마진도 수수료 차감 적용 (투입 금액 기준)
-          const feeDeduct = rawMargin * sel.lev * fee * 2;
-          const addMargin = rawMargin - feeDeduct;
-          const addNotional = addMargin * sel.lev;
-          const addQty = addNotional / price;
-          return { price, rawMargin, margin: addMargin, feeDeduct, notional: addNotional, qty: addQty };
-        });
+          // DCA 추가 마진: fromInput으로 정확한 수수료 차감
+          const conv = fromInput(rawMargin, price, sel.lev, fee, sel.dir, sel.coin);
+          if (!conv) return null;
+          return { price, rawMargin, margin: conv.margin, feeDeduct: conv.openCost + conv.closeCost, notional: conv.size, qty: conv.qty };
+        }).filter(Boolean);
 
       if (dcaList.length > 0) {
         const addTotalNotional = dcaList.reduce((a, d) => a + d.notional, 0);
@@ -562,11 +595,11 @@ export default function SimV4() {
           afterLiqDist = ((cp - afterLiq) / cp) * 100;
         }
 
-        // Breakeven
-        const totalFee = newNotional * fee * 2;
+        // Breakeven (대수적 해: 진입+청산 수수료 반영)
         const breakeven = sel.dir === "long"
-          ? newAvg + totalFee / newQty
-          : newAvg - totalFee / newQty;
+          ? newAvg * (1 + fee) / (1 - fee)
+          : newAvg * (1 - fee) / (1 + fee);
+        const totalFee = Math.abs(breakeven - newAvg) * newQty;
         const moveNeeded = pct(breakeven - newAvg, newAvg);
 
         // Free margin after (Bybit: 손실만 반영)
@@ -589,7 +622,7 @@ export default function SimV4() {
           addTotalFeeDeduct: dcaList.reduce((a, d) => a + d.feeDeduct, 0),
           before: { avg: sel.ep, margin: sel.mg, notional: sel.notional, qty: sel.qty, liq: exLiq || null, pnl: sel.pnl, roe: sel.roe, liqDist: liqDistPct },
           after: { avg: newAvg, margin: newMargin, notional: newNotional, qty: newQty, liq: afterLiq, pnl: afterPnL, roe: afterROE, liqDist: afterLiqDist },
-          breakeven, moveNeeded, totalFee,
+          breakeven, moveNeeded, totalFee, feeRate: fee,
           afterFreeMargin, liqWorse,
           avgDelta: newAvg - sel.ep,
           avgDeltaPct: pct(newAvg - sel.ep, sel.ep),
@@ -638,10 +671,10 @@ export default function SimV4() {
               afterLiqDist = ((cp - afterLiq) / cp) * 100;
             }
 
-            const totalFee = newNotional * fee * 2;
             const breakeven = isLong
-              ? newAvg + totalFee / newQty
-              : newAvg - totalFee / newQty;
+              ? newAvg * (1 + fee) / (1 - fee)
+              : newAvg * (1 - fee) / (1 + fee);
+            const totalFee = Math.abs(breakeven - newAvg) * newQty;
             const moveNeeded = pct(breakeven - newAvg, newAvg);
 
             const afterTotalMargin = totalMargin + addMargin;
@@ -665,7 +698,7 @@ export default function SimV4() {
             }
 
             // 수수료 포함 투입 필요 금액 역산
-            const requiredInputMargin = addMargin / (1 - sel.lev * fee * 2);
+            const requiredInputMargin = fromDisplay(addMargin, rp, sel.lev, fee, sel.dir);
             const revFeeDeduct = requiredInputMargin - addMargin;
 
             revResult = {
@@ -675,7 +708,7 @@ export default function SimV4() {
               requiredNotional: addNotional, addQty,
               before: { avg: sel.ep, margin: sel.mg, notional: sel.notional, qty: sel.qty, liq: exLiq || null, pnl: sel.pnl, roe: sel.roe, liqDist: liqDistPct },
               after: { avg: newAvg, margin: newMargin, notional: newNotional, qty: newQty, liq: afterLiq, pnl: afterPnL, roe: afterROE, liqDist: afterLiqDist },
-              breakeven, moveNeeded, totalFee,
+              breakeven, moveNeeded, totalFee, feeRate: fee,
               afterFreeMargin, liqWorse,
               marginInsufficient: addMargin > Math.max(freeMargin, 0),
               maxReachableAvg,
@@ -864,10 +897,10 @@ export default function SimV4() {
           const dcaPrice = dcaEntries.length > 0 ? n(dcaEntries[0].price) : 0;
           if (dcaPrice > 0) {
             const dcaRawMargin = remFreeMargin;
-            const dcaFeeDeduct = dcaRawMargin * sel.lev * fee * 2;
-            const dcaMargin = dcaRawMargin - dcaFeeDeduct;
-            const dcaNotional = dcaMargin * sel.lev;
-            const dcaQty = dcaNotional / dcaPrice;
+            const dcaConv = fromInput(dcaRawMargin, dcaPrice, sel.lev, fee, sel.dir, sel.coin);
+            const dcaMargin = dcaConv ? dcaConv.margin : 0;
+            const dcaNotional = dcaConv ? dcaConv.size : 0;
+            const dcaQty = dcaConv ? dcaConv.qty : 0;
             const newQty2 = remQty + dcaQty;
             const newNotional2 = remNotional + dcaNotional;
             const newAvg2 = newNotional2 / newQty2;
@@ -876,10 +909,9 @@ export default function SimV4() {
             const afterPnL2 = sel.sign * (cp - newAvg2) * newQty2;
             const afterROE2 = newMargin2 > 0 ? pct(afterPnL2, newMargin2) : 0;
 
-            const totalFee2 = newNotional2 * fee * 2;
             const breakeven2 = sel.dir === "long"
-              ? newAvg2 + totalFee2 / newQty2
-              : newAvg2 - totalFee2 / newQty2;
+              ? newAvg2 * (1 + fee) / (1 - fee)
+              : newAvg2 * (1 - fee) / (1 + fee);
 
             // New liq after close + DCA
             const cdParsed = remParsed.map((p) =>
@@ -957,11 +989,9 @@ export default function SimV4() {
           const totalWeight = strat.weights.reduce((a, w) => a + w, 0);
           const entries = sorted.map((price, i) => {
             const rawMargin = sTotal * strat.weights[i] / totalWeight;
-            const feeDeduct = rawMargin * sel.lev * fee * 2;
-            const margin = rawMargin - feeDeduct;
-            const notional = margin * sel.lev;
-            const qty = notional / price;
-            return { price, rawMargin, margin, feeDeduct, notional, qty };
+            const conv = fromInput(rawMargin, price, sel.lev, fee, sel.dir, sel.coin);
+            if (!conv) return { price, rawMargin, margin: 0, feeDeduct: 0, notional: 0, qty: 0 };
+            return { price, rawMargin, margin: conv.margin, feeDeduct: conv.openCost + conv.closeCost, notional: conv.size, qty: conv.qty };
           });
 
           const addNotional = entries.reduce((a, e) => a + e.notional, 0);
@@ -976,10 +1006,9 @@ export default function SimV4() {
           );
           const afterLiq = mmRate ? solveLiq(afterParsed, mmRate) : null;
 
-          const totalFee2 = newNotional * fee * 2;
           const breakeven = isLong
-            ? newAvg + totalFee2 / newQty
-            : newAvg - totalFee2 / newQty;
+            ? newAvg * (1 + fee) / (1 - fee)
+            : newAvg * (1 - fee) / (1 + fee);
 
           let afterPnL = 0, afterROE = 0;
           if (cp > 0) {
@@ -1034,12 +1063,10 @@ export default function SimV4() {
           .map((e) => {
             const price = n(e.price);
             const rawMargin = n(e.margin);
-            const feeDeduct = rawMargin * pyraCounter.lev * fee * 2;
-            const addMargin = rawMargin - feeDeduct;
-            const addNotional = addMargin * pyraCounter.lev;
-            const addQty = addNotional / price;
-            return { price, rawMargin, margin: addMargin, feeDeduct, notional: addNotional, qty: addQty };
-          });
+            const conv = fromInput(rawMargin, price, pyraCounter.lev, fee, pyraCounter.dir, pyraCounter.coin);
+            if (!conv) return null;
+            return { price, rawMargin, margin: conv.margin, feeDeduct: conv.openCost + conv.closeCost, notional: conv.size, qty: conv.qty };
+          }).filter(Boolean);
 
         if (pyraList.length > 0 || pyraCounter) {
           // Existing counter position values
@@ -1298,8 +1325,8 @@ export default function SimV4() {
 
             // DCA 후 본전가 (수수료 포함)
             const dcaBreakeven = lockedSign > 0
-              ? dcaNewAvg + (dcaNewNotional * fee * 2) / dcaNewQty
-              : dcaNewAvg - (dcaNewNotional * fee * 2) / dcaNewQty;
+              ? dcaNewAvg * (1 + fee) / (1 - fee)
+              : dcaNewAvg * (1 - fee) / (1 + fee);
 
             // DCA 후 청산가
             let dcaLiq = null;
@@ -1455,11 +1482,9 @@ export default function SimV4() {
           const totalWeight = strat.weights.reduce((a, w) => a + w, 0);
           const entries = sorted.map((price, i) => {
             const rawMargin = sTotal * strat.weights[i] / totalWeight;
-            const feeDeduct = rawMargin * pyraCounter.lev * fee * 2;
-            const margin = rawMargin - feeDeduct;
-            const notional = margin * pyraCounter.lev;
-            const qty = notional / price;
-            return { price, rawMargin, margin, feeDeduct, notional, qty };
+            const conv = fromInput(rawMargin, price, pyraCounter.lev, fee, pyraCounter.dir, pyraCounter.coin);
+            if (!conv) return { price, rawMargin, margin: 0, feeDeduct: 0, notional: 0, qty: 0 };
+            return { price, rawMargin, margin: conv.margin, feeDeduct: conv.openCost + conv.closeCost, notional: conv.size, qty: conv.qty };
           });
           return { name: strat.name, desc: strat.desc, entries };
         });
@@ -1972,7 +1997,7 @@ export default function SimV4() {
             onUpdate={updPos}
             onRemove={() => rmPos(pos.id)}
             canRemove={positions.length > 1}
-            cp={getCp(pos.coin)} feeRate={feeRate} />
+            cp={getCp(pos.coin)} fee={n(feeRate)/100} />
         ))}
         <button onClick={addPos} style={S.addBtn}>+ 포지션 추가</button>
 
@@ -2436,7 +2461,7 @@ export default function SimV4() {
                         cp={selPos ? getCp(selPos.coin) : 0} mode={selPos?.dir === "long" ? "dca-long" : "dca-short"} />
                     </div>
                     <div style={{ flex: 1 }}>
-                      <Inp value={dca.margin} onChange={(v) => updDCA(dca.id, "margin", v)} ph="추가 마진 (USDT)" />
+                      <Inp value={dca.margin} onChange={(v) => updDCA(dca.id, "margin", v)} ph="투입금액 (USDT)" />
                       {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={(v) => updDCA(dca.id, "margin", v)} />}
                     </div>
                     {dcaEntries.length > 1 && (
@@ -2453,7 +2478,7 @@ export default function SimV4() {
 
                 {splitMode && (
                   <div style={S.splitPanel}>
-                    <Fld label="총 투입 마진 (USDT)">
+                    <Fld label="총 투입금액 (USDT)">
                       <Inp value={splitTotal} onChange={setSplitTotal} ph="300" />
                       {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={setSplitTotal} />}
                     </Fld>
@@ -2678,7 +2703,7 @@ export default function SimV4() {
                           mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor="#f59e0b" />
                       </div>
                       <div style={{ flex: 1 }}>
-                        <Inp value={entry.margin} onChange={(v) => updPyra(entry.id, "margin", v)} ph="마진 (USDT)" />
+                        <Inp value={entry.margin} onChange={(v) => updPyra(entry.id, "margin", v)} ph="투입금액 (USDT)" />
                         {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={(v) => updPyra(entry.id, "margin", v)} accentColor="#f59e0b" />}
                       </div>
                       {pyraEntries.length > 1 && (
@@ -2695,7 +2720,7 @@ export default function SimV4() {
 
                   {pyraSplitMode && (
                     <div style={{ ...S.splitPanel, borderColor: "#f59e0b22" }}>
-                      <Fld label="총 투입 마진 (USDT)">
+                      <Fld label="총 투입금액 (USDT)">
                         <Inp value={pyraSplitTotal} onChange={setPyraSplitTotal} ph="300" />
                         {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={setPyraSplitTotal} accentColor="#f59e0b" />}
                       </Fld>
@@ -3783,16 +3808,17 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
   const liqWorse = r.liqWorse;
 
   // Exit scenario calculations
-  const fee = r.totalFee;
+  const fr = r.feeRate || 0;
   const calcExit = (targetPnL) => {
-    // targetPnL is the desired realized PnL in USDT (after fees)
-    // exitPrice where: sign * (exitPrice - avg) * qty - fee = targetPnL
-    // Long: (exitPrice - avg) * qty = targetPnL + fee → exitPrice = avg + (targetPnL + fee) / qty
-    // Short: (avg - exitPrice) * qty = targetPnL + fee → exitPrice = avg - (targetPnL + fee) / qty
+    // targetPnL: 수수료 차감 후 실현 PnL
+    // Long: (exit - avg) × qty - avg×qty×fee - exit×qty×fee = targetPnL
+    //   → exit = (targetPnL + avg×qty×(1+fee)) / (qty×(1-fee))
+    // Short: (avg - exit) × qty - avg×qty×fee - exit×qty×fee = targetPnL
+    //   → exit = (avg×qty×(1-fee) - targetPnL) / (qty×(1+fee))
     if (a.qty <= 0) return null;
     const exitPrice = isLong
-      ? a.avg + (targetPnL + fee) / a.qty
-      : a.avg - (targetPnL + fee) / a.qty;
+      ? (targetPnL + a.avg * a.qty * (1 + fr)) / (a.qty * (1 - fr))
+      : (a.avg * a.qty * (1 - fr) - targetPnL) / (a.qty * (1 + fr));
     if (exitPrice <= 0) return null;
     const changePct = cp > 0 ? ((exitPrice - cp) / cp) * 100 : 0;
     return { exitPrice, changePct, pnl: targetPnL };
@@ -3907,7 +3933,7 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
             )}
           </>
         )}
-        <SL label="왕복 수수료" value={`${fmt(r.totalFee)} USDT`} />
+        <SL label="예상 수수료 (진입+청산)" value={`${fmt(r.totalFee)} USDT`} />
         <SL label="물타기 후 사용 가능" value={`${fmt(r.afterFreeMargin, 0)} USDT`}
           warn={r.afterFreeMargin < 0} />
         {r.marginInsufficient && <SL label="⚠ 잔고 상태" value="마진 부족" warn />}
@@ -4143,7 +4169,75 @@ function SplitAutoGen({ cp, isLong, onGenerate, accentColor }) {
   );
 }
 
-function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyra, onUpdate, onRemove, canRemove, cp, feeRate: fr }) {
+function InputCalc({ pos, ep, lev, fee, onUpdate }) {
+  const [open, setOpen] = useState(false);
+  const [amt, setAmt] = useState("");
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      <button onClick={() => setOpen(!open)} style={{
+        background: "none", border: "none", padding: 0,
+        fontSize: 10, color: open ? "#0ea5e9" : "#4b5563",
+        cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2,
+      }}>
+        {open ? "▾ 투입금액 계산기 닫기" : "💰 투입금액으로 계산"}
+      </button>
+      {open && (
+        <div style={{
+          marginTop: 4, padding: 8, background: "#06060e",
+          borderRadius: 6, border: "1px solid #1e1e2e",
+        }}>
+          <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>
+            투입금액을 입력하면 수수료를 차감한 표시 마진을 자동 계산합니다
+          </div>
+          <Inp value={amt} onChange={(v) => {
+            setAmt(v);
+            if (ep > 0 && n(v) > 0 && lev > 0) {
+              const conv = fromInput(n(v), ep, lev, fee, pos.dir, pos.coin);
+              if (conv) onUpdate(pos.id, "margin", String(Math.round(conv.margin * 1e6) / 1e6));
+            }
+          }} ph="실제 넣은 금액 (예: 300)" />
+          {ep > 0 && n(amt) > 0 && (() => {
+            const conv = fromInput(n(amt), ep, lev, fee, pos.dir, pos.coin);
+            if (!conv) return <div style={{ fontSize: 10, color: "#f87171", marginTop: 4 }}>계산 불가 (값 확인)</div>;
+            return (
+              <div style={{ marginTop: 6, fontSize: 10, color: "#4b5563", lineHeight: 1.6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>표시 마진</span><span style={{ color: "#cbd5e1" }}>{fmt(conv.margin)} USDT</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>진입 수수료</span><span style={{ color: "#f59e0b" }}>-{fmt(conv.openCost)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>청산 수수료 예약</span><span style={{ color: "#f59e0b" }}>-{fmt(conv.closeCost)}</span>
+                </div>
+                {conv.change > 0.01 && (
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>잔돈 (수량 내림)</span><span>{fmt(conv.change)}</span>
+                  </div>
+                )}
+                <div style={{ display: "flex", justifyContent: "space-between",
+                              marginTop: 2, borderTop: "1px solid #1e1e2e", paddingTop: 2 }}>
+                  <span>수량</span><span style={{ color: "#cbd5e1" }}>{fmt(conv.qty, 4)} {pos.coin}</span>
+                </div>
+                <div style={{ marginTop: 4, fontSize: 9, color: "#6b728088" }}>
+                  ※ 거래소 실제 수량과 소폭 차이가 있을 수 있습니다
+                </div>
+              </div>
+            );
+          })()}
+          {ep <= 0 && n(amt) > 0 && (
+            <div style={{ fontSize: 10, color: "#f59e0b", marginTop: 4 }}>
+              진입가를 먼저 입력하세요
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyra, onUpdate, onRemove, canRemove, cp, fee }) {
   const [showMoreCoins, setShowMoreCoins] = useState(false);
   const dirC = pos.dir === "long" ? "#34d399" : "#f87171";
   const ep = n(pos.entryPrice), mg = n(pos.margin), lev = n(pos.leverage);
@@ -4260,11 +4354,12 @@ function PosCard({ pos, idx, isSel, isPyraLocked, isPyraCounter, onSelect, onPyr
         </Fld>
       </div>
       <div style={{ ...S.grid2, marginTop: 8 }}>
-        <Fld label="오픈 균일가 ($)">
+        <Fld label="평균 진입가 ($)">
           <PriceInp value={pos.entryPrice} onChange={(v) => onUpdate(pos.id, "entryPrice", v)} ph="거래소에서 확인" cp={cp} mode="entry" />
         </Fld>
-        <Fld label="마진 (USDT)">
+        <Fld label="표시 마진 (USDT)">
           <Inp value={pos.margin} onChange={(v) => onUpdate(pos.id, "margin", v)} ph="거래소에서 확인" />
+          <InputCalc pos={pos} ep={ep} lev={lev} fee={fee} onUpdate={onUpdate} />
         </Fld>
       </div>
       {ep > 0 && mg > 0 && (
