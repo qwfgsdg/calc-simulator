@@ -326,8 +326,9 @@ export default function SimV4() {
   };
 
   // ── 프로필 전환 ──
-  const switchProfile = async (targetId) => {
-    if (targetId === activeProfileId) return;
+  const switchProfile = async (targetId, profilesOverride) => {
+    if (targetId === activeProfileId && !profilesOverride) return;
+    const currentProfiles = profilesOverride || profiles;
     // 현재 프로필 저장 (flush)
     clearTimeout(saveTimer.current);
     if (activeProfileId) {
@@ -348,7 +349,7 @@ export default function SimV4() {
     if (data) applyProfileData(data);
 
     // lastUsed 갱신
-    const updatedProfiles = profiles.map(p =>
+    const updatedProfiles = currentProfiles.map(p =>
       p.id === targetId ? { ...p, lastUsed: Date.now() } : p
     );
     setProfiles(updatedProfiles);
@@ -365,8 +366,8 @@ export default function SimV4() {
     const updatedProfiles = [...profiles, newP];
     setProfiles(updatedProfiles);
     await storageAdapter.save(STORAGE_KEY_PROFILES, updatedProfiles);
-    // 생성 후 바로 전환
-    await switchProfile(newP.id);
+    // 생성 후 바로 전환 (최신 배열 override)
+    await switchProfile(newP.id, updatedProfiles);
   };
 
   // ── 프로필 이름/색상 변경 ──
@@ -388,7 +389,7 @@ export default function SimV4() {
     await storageAdapter.save(STORAGE_KEY_PROFILES, remaining);
     if (activeProfileId === id) {
       const next = [...remaining].sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0))[0];
-      await switchProfile(next.id);
+      await switchProfile(next.id, remaining);
     }
   };
 
