@@ -153,6 +153,11 @@ export default function SimV4() {
   const [targetAvail, setTargetAvail] = useState("");
   const [closeRatio, setCloseRatio] = useState("50");
   const [closePrice, setClosePrice] = useState("");
+
+  // ── 헷지 시뮬레이션 ──
+  const [hedgeEntry, setHedgeEntry] = useState("");    // 헷지 진입 예정가
+  const [hedgeMargin, setHedgeMargin] = useState("");  // 헷지 투입금액 (USDT)
+  const [hedgeLev, setHedgeLev] = useState("");        // 헷지 레버리지 (빈값=선택 포지션과 동일)
   const [splitMode, setSplitMode] = useState(false);
   const [splitTotal, setSplitTotal] = useState("");
   const [splitPrices, setSplitPrices] = useState(["", "", ""]);
@@ -506,6 +511,7 @@ export default function SimV4() {
     setDcaEntries([mkDCA()]);
     setRevPrice(""); setRevTarget("");
     setDcaMode("sim");
+    setHedgeEntry(""); setHedgeMargin(""); setHedgeLev("");
     // Clear pyra when switching to DCA mode
     setPyraMode(false); setPyraLockedId(null); setPyraCounterId(null);
   };
@@ -1102,6 +1108,123 @@ export default function SimV4() {
           liqDistBefore: liqDistPct,
           closeAndDCA,
         };
+      }
+    }
+
+    // ── Hedge simulation ──
+    let hedgeResult = null;
+    if (sel && dcaMode === "hedge") {
+      const hEntry = n(hedgeEntry);
+      const hInput = n(hedgeMargin);
+      const hLev = n(hedgeLev) || sel.lev;
+      const hedgeDir = sel.dir === "long" ? "short" : "long";
+      const hedgeSign = hedgeDir === "long" ? 1 : -1;
+
+      if (hEntry > 0 && hInput > 0 && hLev > 0) {
+        const conv = fromInput(hInput, hEntry, hLev, fee, hedgeDir, sel.coin);
+
+        if (conv) {
+          const virtualPos = {
+            id: "hedge-virtual", dir: hedgeDir, sign: hedgeSign, coin: sel.coin,
+            ep: hEntry, mg: conv.margin, qty: conv.qty,
+            notional: conv.size, lev: hLev, pcp: sel.pcp,
+          };
+          const simParsed = [...parsed, virtualPos];
+
+          // 새 강청가 계산
+          const newLiq = mmRate ? solveLiq(simParsed, mmRate) : null;
+          const newLiqForCoin = mmRate ? solveLiqForCoin(sel.coin, simParsed, mmRate) : null;
+
+          const liqBefore2 = exLiq || null;
+          const liqAfter = newLiq;
+          const isLong = sel.dir === "long";
+          let liqImproved = null;
+          if (liqBefore2 && liqAfter) {
+            liqImproved = isLong ? liqAfter < liqBefore2 : liqAfter > liqBefore2;
+          }
+          let liqDistAfter = null;
+          if (liqAfter != null && cp > 0) {
+            liqDistAfter = ((cp - liqAfter) / cp) * 100;
+          }
+
+          // 동시 청산 PnL 계산
+          const origPnLAt = (P) => sel.sign * (P - sel.ep) * sel.qty;
+          const hedgePnLAt = (P) => hedgeSign * (P - hEntry) * conv.qty;
+          const hCloseFeeAt = (P) => (sel.qty + conv.qty) * P * fee;
+          const hEntryFees = conv.openCost;
+          const netAt = (P) => origPnLAt(P) + hedgePnLAt(P) - hCloseFeeAt(P) - hEntryFees;
+
+          // 본전가 역산 (청산 수수료만)
+          const coefP = sel.sign * sel.qty + hedgeSign * conv.qty - fee * (sel.qty + conv.qty);
+          const constTerm = sel.sign * sel.ep * sel.qty + hedgeSign * hEntry * conv.qty;
+          let breakevenClose2 = null;
+          if (Math.abs(coefP) > 1e-12) {
+            const be = constTerm / coefP;
+            if (be > 0) breakevenClose2 = be;
+          }
+          // 본전가 (전체 수수료)
+          let breakevenAll = null;
+          if (Math.abs(coefP) > 1e-12) {
+            const be = (constTerm + hEntryFees) / coefP;
+            if (be > 0) breakevenAll = be;
+          }
+
+          // 가용 마진 변화
+          const simTotalMargin = totalMargin + conv.margin;
+          const simLossPnL = simParsed.reduce((a, p) => {
+            const priceForP = p.pcp > 0 ? p.pcp : (p.coin === sel.coin ? cp : 0);
+            const pnl2 = priceForP > 0 ? p.sign * (priceForP - p.ep) * p.qty : 0;
+            return a + Math.min(pnl2, 0);
+          }, 0);
+          const simFreeMargin = (wb + simLossPnL) - simTotalMargin;
+
+          // 시나리오 테이블
+          const hScenarios = [];
+          [-10, -5, -3, -1, 0, 1, 3, 5, 10].forEach(pv => {
+            const P = cp > 0 ? cp * (1 + pv / 100) : 0;
+            if (P <= 0) return;
+            hScenarios.push({
+              label: pv === 0 ? "현재가" : `${pv > 0 ? "+" : ""}${pv}%`,
+              price: P,
+              origPnL: origPnLAt(P), hedgePnL: hedgePnLAt(P),
+              combined: origPnLAt(P) + hedgePnLAt(P),
+              closeFee: hCloseFeeAt(P),
+              net: netAt(P),
+              isCurrent: pv === 0,
+            });
+          });
+          if (breakevenAll && cp > 0) {
+            hScenarios.push({
+              label: "본전", price: breakevenAll,
+              origPnL: origPnLAt(breakevenAll), hedgePnL: hedgePnLAt(breakevenAll),
+              combined: origPnLAt(breakevenAll) + hedgePnLAt(breakevenAll),
+              closeFee: hCloseFeeAt(breakevenAll), net: 0, isSpecial: true,
+            });
+          }
+          hScenarios.sort((a, b) => a.price - b.price);
+
+          hedgeResult = {
+            conv, hedgeDir, hedgeSign, hEntry, hLev,
+            virtualPos,
+            liqBefore: liqBefore2, liqAfter,
+            liqImproved,
+            liqDistBefore: liqDistPct, liqDistAfter,
+            liqChange: liqBefore2 && liqAfter ? ((liqAfter - liqBefore2) / liqBefore2) * 100 : null,
+            breakevenClose: breakevenClose2, breakevenAll,
+            beAllDist: breakevenAll && cp > 0 ? ((breakevenAll - cp) / cp) * 100 : null,
+            currentOrigPnL: cp > 0 ? origPnLAt(cp) : 0,
+            currentHedgePnL: cp > 0 ? hedgePnLAt(cp) : 0,
+            currentCloseFee: cp > 0 ? hCloseFeeAt(cp) : 0,
+            currentNet: cp > 0 ? netAt(cp) : 0,
+            entryFees: hEntryFees,
+            hedgeMarginDisplay: conv.margin,
+            hedgeFeeDeduct: conv.openCost + conv.closeCost,
+            afterTotalMargin: simTotalMargin,
+            afterFreeMargin: simFreeMargin,
+            marginInsufficient: hInput > Math.max(freeMargin, 0),
+            scenarios: hScenarios,
+          };
+        }
       }
     }
 
@@ -1739,9 +1862,9 @@ export default function SimV4() {
       sel, dcaResult, revResult, closeResult, splitResult, availCalc,
       pyraResult, pyraRevResult, pyraSplitResult,
       pyraLocked, pyraCounter,
-      hedgePairs,
+      hedgePairs, hedgeResult,
     };
-  }, [wallet, coinPrices, feeRate, coinLiqPrices, positions, selId, dcaMode, dcaEntries, revPrice, revTarget, targetAvail, closeRatio, closePrice, splitMode, splitTotal, splitPrices, pyraMode, pyraLockedId, pyraCounterId, pyraSubMode, pyraEntries, pyraRevPrice, pyraRevTarget, pyraSplitMode, pyraSplitTotal, pyraSplitPrices, scCloseRatios, scTargets]);
+  }, [wallet, coinPrices, feeRate, coinLiqPrices, positions, selId, dcaMode, dcaEntries, revPrice, revTarget, targetAvail, closeRatio, closePrice, splitMode, splitTotal, splitPrices, pyraMode, pyraLockedId, pyraCounterId, pyraSubMode, pyraEntries, pyraRevPrice, pyraRevTarget, pyraSplitMode, pyraSplitTotal, pyraSplitPrices, scCloseRatios, scTargets, hedgeEntry, hedgeMargin, hedgeLev]);
 
   const selPos = positions.find((p) => p.id === selId);
 
@@ -2788,15 +2911,15 @@ export default function SimV4() {
         {/* ④ DCA SECTION */}
         {selId && selPos && (
           <>
-            <Sec label={`물타기 — ${selPos.coin} ${selPos.dir === "long" ? "롱" : "숏"}`} accent />
+            <Sec label={`${dcaMode === "hedge" ? "🛡 헷지" : "물타기"} — ${selPos.coin} ${selPos.dir === "long" ? "롱" : "숏"}`} accent />
 
             <div style={S.modeRow}>
-              {[["sim", "추가 진입"], ["reverse", "목표 평단"], ["close", "부분 청산"]].map(([k, lb]) => (
+              {[["sim", "추가 진입"], ["reverse", "목표 평단"], ["close", "부분 청산"], ["hedge", "🛡 헷지"]].map(([k, lb]) => (
                 <button key={k} onClick={() => setDcaMode(k)} style={{
                   ...S.modeBtn,
-                  background: dcaMode === k ? (k === "close" ? "#f8717115" : "#0ea5e915") : "transparent",
-                  borderColor: dcaMode === k ? (k === "close" ? "#f8717144" : "#0ea5e944") : "#1e1e2e",
-                  color: dcaMode === k ? (k === "close" ? "#f87171" : "#0ea5e9") : "#6b7280",
+                  background: dcaMode === k ? (k === "close" ? "#f8717115" : k === "hedge" ? "#a78bfa15" : "#0ea5e915") : "transparent",
+                  borderColor: dcaMode === k ? (k === "close" ? "#f8717144" : k === "hedge" ? "#a78bfa44" : "#0ea5e944") : "#1e1e2e",
+                  color: dcaMode === k ? (k === "close" ? "#f87171" : k === "hedge" ? "#a78bfa" : "#0ea5e9") : "#6b7280",
                 }}>{lb}</button>
               ))}
             </div>
@@ -2804,6 +2927,7 @@ export default function SimV4() {
               {dcaMode === "sim" && "지정 가격에 추가 매수하면 평단·청산가·ROE가 어떻게 바뀌는지 미리 확인"}
               {dcaMode === "reverse" && "원하는 평단가를 입력하면 필요한 마진/가격을 역으로 계산"}
               {dcaMode === "close" && "지정 비율만큼 포지션을 줄였을 때의 손익과 잔여 포지션 확인"}
+              {dcaMode === "hedge" && "반대 방향 포지션을 추가했을 때 강제 청산가·가용 마진 변화를 미리 확인"}
             </div>
 
             {dcaMode === "sim" && (
@@ -2976,8 +3100,282 @@ export default function SimV4() {
                 </div>
               </>
             )}
+
+            {/* ═══ HEDGE INPUT ═══ */}
+            {dcaMode === "hedge" && selPos && (
+              <>
+                <div style={{
+                  padding: 10, borderRadius: 8, background: "#a78bfa08",
+                  border: "1px solid #a78bfa22", marginBottom: 12,
+                  fontSize: 11, color: "#a78bfa", fontFamily: "'DM Sans'",
+                }}>
+                  🛡 {selPos.coin} {selPos.dir === "long" ? "롱" : "숏"} 포지션에{" "}
+                  <strong style={{ color: selPos.dir === "long" ? "#f87171" : "#34d399" }}>
+                    {selPos.dir === "long" ? "숏" : "롱"}
+                  </strong> 헷지를 추가하면?
+                </div>
+
+                <div style={S.grid2}>
+                  <Fld label={`${selPos.dir === "long" ? "숏" : "롱"} 진입 예정가 ($)`}>
+                    <PriceInp
+                      value={hedgeEntry} onChange={setHedgeEntry}
+                      ph="헷지 진입가"
+                      cp={getCp(selPos.coin)}
+                      mode={selPos.dir === "long" ? "dca-short" : "dca-long"}
+                      accentColor="#a78bfa"
+                    />
+                  </Fld>
+                  <Fld label="투입금액 (USDT)">
+                    <Inp value={hedgeMargin} onChange={setHedgeMargin} ph="투입금액" />
+                    {calc && <MarginPresets
+                      freeMargin={calc.freeMargin}
+                      onSelect={setHedgeMargin}
+                      accentColor="#a78bfa"
+                    />}
+                  </Fld>
+                </div>
+
+                <div style={{ marginTop: 8 }}>
+                  <Fld label={`레버리지 (비워두면 기존 ${selPos.leverage}x 동일)`}>
+                    <select
+                      value={hedgeLev || selPos.leverage}
+                      onChange={(e) => setHedgeLev(e.target.value)}
+                      style={S.sel}
+                    >
+                      {LEV_PRESETS.map((l) => <option key={l} value={l}>x{l}</option>)}
+                    </select>
+                  </Fld>
+                </div>
+              </>
+            )}
           </>
         )}
+
+        {/* ═══ HEDGE RESULT ═══ */}
+        {calc?.hedgeResult && calc.cp > 0 && selPos && (() => {
+          const hr = calc.hedgeResult;
+          const hedgeDirKr = hr.hedgeDir === "long" ? "롱" : "숏";
+          const hasLiq = hr.liqBefore != null && hr.liqAfter != null;
+          const liqAbsBefore = hr.liqDistBefore != null ? Math.abs(hr.liqDistBefore) : null;
+          const liqAbsAfter = hr.liqDistAfter != null ? Math.abs(hr.liqDistAfter) : null;
+          const liqColor = (dist) => dist > 50 ? "#34d399" : dist > 20 ? "#f59e0b" : "#f87171";
+
+          return (
+            <>
+              <div style={{ ...S.divider, background: "linear-gradient(90deg, transparent, #a78bfa22, transparent)" }} />
+
+              {/* 마진 부족 경고 */}
+              {hr.marginInsufficient && (
+                <div style={S.warnBox}>
+                  ⚠ 사용 가능({fmt(calc.freeMargin)}) &lt; 투입금액({fmt(n(hedgeMargin))}) USDT — 마진이 부족합니다
+                </div>
+              )}
+
+              {/* ── 강청가 변화 카드 ── */}
+              {hasLiq ? (
+                <div style={{
+                  padding: 16, borderRadius: 12,
+                  background: "#0a0a14", border: `1px solid ${hr.liqImproved ? "#34d39944" : "#f8717144"}`,
+                  marginBottom: 12,
+                }}>
+                  <div style={{ fontSize: 10, color: "#a78bfa", letterSpacing: 2, fontWeight: 700, fontFamily: "'DM Sans'", marginBottom: 12 }}>
+                    강제 청산가 변화
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 8, alignItems: "center", marginBottom: 14 }}>
+                    {/* Before */}
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 4 }}>기존</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#f59e0b", fontFamily: "'DM Sans'" }}>
+                        ${fmt(hr.liqBefore, hr.liqBefore > 100 ? 2 : 4)}
+                      </div>
+                      {liqAbsBefore != null && (
+                        <div style={{ fontSize: 11, color: liqColor(liqAbsBefore), marginTop: 2 }}>
+                          여유 {fmt(liqAbsBefore)}%
+                        </div>
+                      )}
+                    </div>
+                    {/* Arrow */}
+                    <div style={{ fontSize: 20, color: hr.liqImproved ? "#34d399" : "#f87171" }}>→</div>
+                    {/* After */}
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 4 }}>헷지 후</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: hr.liqImproved ? "#34d399" : "#f87171", fontFamily: "'DM Sans'" }}>
+                        ${fmt(hr.liqAfter, hr.liqAfter > 100 ? 2 : 4)}
+                      </div>
+                      {liqAbsAfter != null && (
+                        <div style={{ fontSize: 11, color: liqColor(liqAbsAfter), marginTop: 2 }}>
+                          여유 {fmt(liqAbsAfter)}%
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Visual bars */}
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+                      <span style={{ fontSize: 9, color: "#4b5563", width: 32 }}>기존</span>
+                      <div style={{ flex: 1, height: 5, background: "#1e1e2e", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ height: "100%", borderRadius: 3, width: `${Math.min(liqAbsBefore || 0, 100)}%`, background: liqColor(liqAbsBefore || 0) }} />
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <span style={{ fontSize: 9, color: "#4b5563", width: 32 }}>헷지</span>
+                      <div style={{ flex: 1, height: 5, background: "#1e1e2e", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ height: "100%", borderRadius: 3, width: `${Math.min(liqAbsAfter || 0, 100)}%`, background: liqColor(liqAbsAfter || 0), transition: "width 0.3s" }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Summary text */}
+                  <div style={{
+                    fontSize: 12, fontWeight: 600, fontFamily: "'DM Sans'", textAlign: "center",
+                    color: hr.liqImproved ? "#34d399" : "#f87171", marginTop: 8,
+                  }}>
+                    {hr.liqImproved
+                      ? `✓ 청산가 ${fmt(Math.abs(hr.liqChange))}% ${calc.sel.dir === "long" ? "하락" : "상승"} — 안전 거리 확대`
+                      : `⚠ 청산가 ${fmt(Math.abs(hr.liqChange))}% ${calc.sel.dir === "long" ? "상승" : "하락"} — 주의`}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ ...S.liqEmpty, marginBottom: 12 }}>
+                  거래소 강제 청산가를 입력하면 청산가 변화를 확인할 수 있습니다
+                </div>
+              )}
+
+              {/* ── 헷지 포지션 상세 ── */}
+              <div style={S.detBox}>
+                <div style={{ ...S.detTitle, color: "#a78bfa" }}>헷지 포지션 상세</div>
+                <SL label="방향" value={`${hedgeDirKr} (${hr.hedgeDir.toUpperCase()})`} />
+                <SL label="진입가" value={`$${fmt(hr.hEntry, hr.hEntry > 100 ? 2 : 4)}`} />
+                <SL label="표시 마진" value={`${fmt(hr.hedgeMarginDisplay)} USDT`} />
+                <SL label="수수료 차감" value={`-${fmt(hr.hedgeFeeDeduct)} USDT`} warn />
+                <SL label="수량" value={`${fmt(hr.conv.qty, 4)} ${selPos.coin}`} />
+                <SL label="포지션 크기" value={`${fmt(hr.conv.size, 0)} USDT`} />
+                <SL label="레버리지" value={`${hr.hLev}x`} />
+              </div>
+
+              {/* ── 마진 변화 + 동시 청산 ── */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                {/* 마진 변화 */}
+                <div style={{ padding: 14, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e" }}>
+                  <div style={{ fontSize: 10, color: "#a78bfa", fontWeight: 700, letterSpacing: 2, fontFamily: "'DM Sans'", marginBottom: 8 }}>마진 변화</div>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>
+                    사용 마진
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", marginBottom: 8 }}>
+                    {fmt(calc.totalMargin)} → <span style={{ color: "#a78bfa" }}>{fmt(hr.afterTotalMargin)}</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>
+                    가용 마진
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: hr.afterFreeMargin >= 0 ? "#34d399" : "#f87171" }}>
+                    {fmt(calc.freeMargin)} → <span>{fmt(hr.afterFreeMargin)}</span>
+                  </div>
+                  <div style={{ fontSize: 9, color: "#4b5563", marginTop: 6 }}>
+                    차이: {fmtS(hr.afterFreeMargin - calc.freeMargin)} USDT
+                  </div>
+                </div>
+
+                {/* 동시 청산 */}
+                <div style={{ padding: 14, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e" }}>
+                  <div style={{ fontSize: 10, color: "#a78bfa", fontWeight: 700, letterSpacing: 2, fontFamily: "'DM Sans'", marginBottom: 8 }}>동시 청산 시</div>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 2 }}>기존 PnL</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: hr.currentOrigPnL >= 0 ? "#34d399" : "#f87171", marginBottom: 6 }}>
+                    {fmtS(hr.currentOrigPnL)}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 2 }}>헷지 PnL</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: hr.currentHedgePnL >= 0 ? "#34d399" : "#f87171", marginBottom: 6 }}>
+                    {fmtS(hr.currentHedgePnL)}
+                  </div>
+                  <div style={{ borderTop: "1px solid #1e1e2e", paddingTop: 6, marginTop: 2 }}>
+                    <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 2 }}>순손익 (수수료 후)</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: hr.currentNet >= 0 ? "#34d399" : "#f87171" }}>
+                      {fmtS(hr.currentNet)} USDT
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── 본전가 ── */}
+              {hr.breakevenAll && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                  <div style={{ padding: 14, borderRadius: 10, background: "#a78bfa08", border: "1px solid #a78bfa33", textAlign: "center" }}>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>본전가 (전체 수수료)</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "#a78bfa", fontFamily: "'DM Sans'" }}>
+                      ${fmt(hr.breakevenAll, hr.breakevenAll > 100 ? 2 : 4)}
+                    </div>
+                    {hr.beAllDist != null && (
+                      <div style={{ fontSize: 11, color: hr.beAllDist >= 0 ? "#34d399" : "#f87171", marginTop: 2 }}>
+                        현재가 대비 {fmtS(hr.beAllDist)}%
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ padding: 14, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e", textAlign: "center" }}>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>본전가 (청산 수수료만)</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "#94a3b8", fontFamily: "'DM Sans'" }}>
+                      {hr.breakevenClose ? `$${fmt(hr.breakevenClose, hr.breakevenClose > 100 ? 2 : 4)}` : "—"}
+                    </div>
+                    {hr.breakevenClose && calc.cp > 0 && (
+                      <div style={{ fontSize: 11, color: ((hr.breakevenClose - calc.cp) / calc.cp * 100) >= 0 ? "#34d399" : "#f87171", marginTop: 2 }}>
+                        현재가 대비 {fmtS((hr.breakevenClose - calc.cp) / calc.cp * 100)}%
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── 수수료 내역 ── */}
+              <div style={S.detBox}>
+                <div style={{ ...S.detTitle, color: "#a78bfa" }}>수수료 내역</div>
+                <SL label="헷지 진입 수수료" value={`-${fmt(hr.conv.openCost)} USDT`} warn />
+                <SL label="헷지 청산 수수료 (예약)" value={`-${fmt(hr.conv.closeCost)} USDT`} warn />
+                <SL label="기존 포지션 청산 수수료 (현재가)" value={`-${fmt(calc.sel.qty * calc.cp * calc.fee)} USDT`} warn />
+                <div style={{ ...S.sl, borderBottom: "none", fontWeight: 600 }}>
+                  <span style={{ color: "#94a3b8" }}>동시 청산 시 총 수수료</span>
+                  <span style={{ color: "#f59e0b", fontWeight: 600 }}>
+                    -{fmt(hr.currentCloseFee + hr.entryFees)} USDT
+                  </span>
+                </div>
+              </div>
+
+              {/* ── 시나리오 테이블 ── */}
+              {hr.scenarios.length > 0 && (
+                <div style={S.tblWrap}>
+                  <table style={S.tbl}>
+                    <thead>
+                      <tr>
+                        <TH>가격</TH>
+                        <TH>기존 PnL</TH>
+                        <TH>헷지 PnL</TH>
+                        <TH>합산</TH>
+                        <TH>수수료</TH>
+                        <TH>순손익</TH>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {hr.scenarios.map((s, i) => (
+                        <tr key={i} style={{
+                          background: s.isCurrent ? "#a78bfa08" : s.isSpecial ? "#a78bfa06" : "transparent",
+                        }}>
+                          <TD c={s.isCurrent ? "#a78bfa" : s.isSpecial ? "#a78bfa99" : "#94a3b8"} bold={s.isCurrent || s.isSpecial}>
+                            {s.isSpecial ? s.label : `$${fmt(s.price, s.price > 100 ? 0 : 2)}`}
+                            {!s.isSpecial && <div style={{ fontSize: 9, color: "#4b5563" }}>{s.label}</div>}
+                          </TD>
+                          <TD c={s.origPnL >= 0 ? "#34d399" : "#f87171"}>{fmtS(s.origPnL)}</TD>
+                          <TD c={s.hedgePnL >= 0 ? "#34d399" : "#f87171"}>{fmtS(s.hedgePnL)}</TD>
+                          <TD c={s.combined >= 0 ? "#34d399" : "#f87171"}>{fmtS(s.combined)}</TD>
+                          <TD c="#f59e0b">-{fmt(s.closeFee + hr.entryFees)}</TD>
+                          <TD c={s.net >= 0 ? "#34d399" : "#f87171"} bold>{fmtS(s.net)}</TD>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {!selId && !pyraMode && (
           <div style={S.empty}>↑ 포지션 카드에서 [물타기] 버튼을 눌러 추가 진입 · 목표 평단 · 부분 청산을 계산하세요</div>
