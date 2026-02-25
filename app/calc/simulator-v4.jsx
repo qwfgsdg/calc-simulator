@@ -1158,8 +1158,24 @@ export default function SimV4() {
       // 첫 번째 항목에 추천 표시
       if (closeGuide.length > 0) closeGuide[0].isRecommended = true;
 
-      // 추가 입금 필요 금액
+      // 추가 입금 필요 금액 + 입금 후 청산가 시뮬레이션
       const depositNeeded = shortfallAmt > 0 ? shortfallAmt : 0;
+      let depositLiq = null;
+      let depositLiqDist = null;
+      if (depositNeeded > 0 && mmRate && parsed.length > 0) {
+        const wbAfterDeposit = wb + depositNeeded;
+        const sumSignQty = parsed.reduce((a, p) => a + p.sign * p.qty, 0);
+        const sumSignEpQty = parsed.reduce((a, p) => a + p.sign * p.ep * p.qty, 0);
+        const sumQty = parsed.reduce((a, p) => a + p.qty, 0);
+        const denom = mmRate * sumQty - sumSignQty;
+        if (Math.abs(denom) > 1e-12) {
+          const liq = (wbAfterDeposit - sumSignEpQty) / denom;
+          if (liq > 0) {
+            depositLiq = liq;
+            if (cp > 0) depositLiqDist = ((cp - liq) / cp) * 100;
+          }
+        }
+      }
 
       if (freeMargin >= tgt) {
         availCalc = { sufficient: true, closeGuide, depositNeeded: 0 };
@@ -1173,7 +1189,7 @@ export default function SimV4() {
         if (neededPrice != null) {
           const direction = neededPrice > cp ? "up" : "down";
           const changePct = ((neededPrice - cp) / cp) * 100;
-          availCalc = { sufficient: false, neededPrice, direction, changePct, closeGuide, depositNeeded, coinAnalysis, hedgeDetected, bestCoinSolution };
+          availCalc = { sufficient: false, neededPrice, direction, changePct, closeGuide, depositNeeded, depositLiq, depositLiqDist, coinAnalysis, hedgeDetected, bestCoinSolution };
         } else {
           // 최대 확보 가능 금액 탐색 (샘플링 + kink points)
           let maxAvail = freeMargin;
@@ -1206,7 +1222,7 @@ export default function SimV4() {
               sufficient: false, neededPrice: maxAvailPrice,
               direction: maxAvailPrice > cp ? "up" : "down",
               changePct: ((maxAvailPrice - cp) / cp) * 100,
-              closeGuide, depositNeeded, coinAnalysis, hedgeDetected, bestCoinSolution,
+              closeGuide, depositNeeded, depositLiq, depositLiqDist, coinAnalysis, hedgeDetected, bestCoinSolution,
             };
           } else {
             const shortfall = tgt - maxAvail;
@@ -1214,7 +1230,7 @@ export default function SimV4() {
               sufficient: false, impossible: true,
               maxAvail, maxAvailPrice, shortfall,
               maxChangePct: ((maxAvailPrice - cp) / cp) * 100,
-              closeGuide, depositNeeded, coinAnalysis, hedgeDetected, bestCoinSolution,
+              closeGuide, depositNeeded, depositLiq, depositLiqDist, coinAnalysis, hedgeDetected, bestCoinSolution,
             };
           }
         }
@@ -3005,8 +3021,20 @@ export default function SimV4() {
                   {/* ③ 추가 입금 */}
                   {calc.availCalc.depositNeeded > 0 && (
                     <div style={{ padding: "8px 10px", borderRadius: 6, background: "#34d39908", border: "1px solid #34d39922", fontSize: 11, color: "#94a3b8" }}>
-                      <span style={{ color: "#34d399", fontWeight: 600 }}>③ 추가 입금</span>
-                      {" · "}지갑에 <span style={{ fontWeight: 700, color: "#34d399" }}>{fmt(calc.availCalc.depositNeeded)} USDT</span> 입금 시 즉시 달성
+                      <div>
+                        <span style={{ color: "#34d399", fontWeight: 600 }}>③ 추가 입금</span>
+                        {" · "}지갑에 <span style={{ fontWeight: 700, color: "#34d399" }}>{fmt(calc.availCalc.depositNeeded)} USDT</span> 입금 시 즉시 달성
+                      </div>
+                      {calc.availCalc.depositLiq != null && calc.exLiq > 0 && (
+                        <div style={{ fontSize: 10, color: "#6b7280", marginTop: 4 }}>
+                          청산가 <span style={{ color: "#94a3b8" }}>${fmt(calc.exLiq)}</span>
+                          {" → "}
+                          <span style={{ color: "#34d399", fontWeight: 600 }}>${fmt(calc.availCalc.depositLiq)}</span>
+                          <span style={{ color: "#6b7280", marginLeft: 3 }}>
+                            (여유 {fmt(Math.abs(calc.liqDistPct), 1)}% → {fmt(Math.abs(calc.availCalc.depositLiqDist), 1)}%)
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
