@@ -159,6 +159,7 @@ export default function SimV4() {
   const [hedgeEntry, setHedgeEntry] = useState("");
   const [hedgeMargin, setHedgeMargin] = useState("");
   const [hedgeLev, setHedgeLev] = useState("");
+  const [hedgeLive, setHedgeLive] = useState(true); // 헷지 진입가 실시간 연동
   const [splitMode, setSplitMode] = useState(false);
   const [splitTotal, setSplitTotal] = useState("");
   const [splitPrices, setSplitPrices] = useState(["", "", ""]);
@@ -482,6 +483,21 @@ export default function SimV4() {
     };
   }, [usedCoins.join(","), priceMode]);
 
+  // ── 헷지 진입가 실시간 연동 ──
+  useEffect(() => {
+    if (!hedgeLive || !hedgeId) return;
+    const targetPos = positions.find(p => p.id === hedgeId);
+    if (!targetPos) return;
+    const cp = n(coinPrices[targetPos.coin] || "");
+    if (cp > 0) {
+      setHedgeEntry(prev => {
+        const prevN = n(prev);
+        // 값이 동일하면 setState 스킵 (렌더 루프 방지)
+        return prevN === cp ? prev : String(cp);
+      });
+    }
+  }, [hedgeLive, hedgeId, coinPrices, positions]);
+
   // Sync split helper from dcaEntries when opening
   const openSplitHelper = () => {
     if (!splitMode) {
@@ -524,7 +540,12 @@ export default function SimV4() {
     setSelId(null);
     setPyraMode(false); setPyraLockedId(null); setPyraCounterId(null);
     setHedgeId(id);
-    setHedgeEntry(""); setHedgeMargin(""); setHedgeLev("");
+    // 현재가 자동 채움 + 실시간 ON
+    const targetPos = positions.find(p => p.id === id);
+    const cp = targetPos ? n(coinPrices[targetPos.coin] || "") : 0;
+    setHedgeEntry(cp > 0 ? String(cp) : "");
+    setHedgeLive(true);
+    setHedgeMargin(""); setHedgeLev("");
   };
 
   // ── Pyramiding (불타기) selection ──
@@ -946,30 +967,82 @@ export default function SimV4() {
       return upResult != null ? upResult : dnResult;
     };
 
-    // Target available calc
+    // Target available calc (목표 사용 가능 금액)
     let availCalc = null;
     const tgt = n(targetAvail);
     if (tgt > 0 && parsed.length > 0 && cp > 0) {
+      const shortfallAmt = tgt - freeMargin; // 부족분
+
+      // ── 부분 청산 가이드 (모든 경우 계산) ──
+      const closeGuide = parsed
+        .filter(p => p.pcp > 0 && p.qty > 0)
+        .map(p => {
+          // X% 청산 시 확보 가능 = 반환 마진 + 실현 PnL - 청산 수수료
+          // 손실 포지션: 마진 반환되지만 PnL 손실 실현 → lossOnlyPnL 클리핑 해제로 available 증가
+          // 이익 포지션: 마진 + PnL 반환
+          const closeFee1Pct = p.qty * 0.01 * p.pcp * fee; // 1% 청산 수수료
+          const pnl1Pct = p.pnl * 0.01; // 1%에 해당하는 PnL
+          const margin1Pct = p.mg * 0.01;
+
+          // Bybit available = wb + lossOnlyPnL - totalMargin
+          // 부분 청산(X%) 후:
+          //   wb' = wb + realizedPnL - closeFee (이익 시 wb 증가, 손실 시 감소)
+          //   totalMargin' = totalMargin - margin*X/100
+          //   lossOnlyPnL' = 나머지 포지션 min(pnl*(1-X/100), 0) + 다른 포지션들
+          // 순 확보 = (마진 반환) + (손실 클리핑 해소 or 이익 실현) - 청산수수료
+          let freed1Pct;
+          if (p.pnl < 0) {
+            // 손실 포지션: 마진 반환 + 손실분 클리핑 해제 (net = margin - |lossPnl|*0.01... 하지만 Bybit 방식에서는)
+            // available 변화 = margin*0.01 (totalMargin 감소) + |pnl|*0.01 (lossOnlyPnL 감소 = 더 적은 손실) - closeFee
+            // But min(pnl, 0) 에서 pnl이 음수이므로 lossOnlyPnL 값은 pnl 자체
+            // 1% 청산 후 lossOnlyPnL 변화: min(pnl*0.99, 0) - min(pnl, 0) = pnl*0.99 - pnl = -pnl*0.01 = |pnl|*0.01
+            freed1Pct = margin1Pct + Math.abs(pnl1Pct) - closeFee1Pct;
+          } else {
+            // 이익 포지션: 마진 반환 + 이익 실현 (wb 증가, but pnl은 이미 lossOnlyPnL에 포함 안 됨)
+            // available 변화 = margin*0.01 (totalMargin 감소) + pnl*0.01 (실현이익 wb 증가) - closeFee
+            freed1Pct = margin1Pct + pnl1Pct - closeFee1Pct;
+          }
+
+          const maxFreed = freed1Pct * 100; // 전량 청산 시 확보
+          let neededPct = freed1Pct > 0 ? (shortfallAmt / freed1Pct) : null;
+          if (neededPct !== null && neededPct > 100) neededPct = null; // 전량 청산해도 부족
+          const neededPctClamped = neededPct !== null ? Math.ceil(neededPct * 10) / 10 : null; // 소수 1자리 올림
+
+          return {
+            id: p.id, coin: p.coin, dir: p.dir,
+            dirKr: p.dir === "long" ? "롱" : "숏",
+            margin: p.mg, pnl: p.pnl, pcp: p.pcp,
+            freed1Pct, // 1% 당 확보 금액
+            maxFreed, // 전량 청산 시 최대
+            closeFee100: closeFee1Pct * 100, // 전량 청산 수수료
+            neededPct: neededPctClamped, // 목표 달성 필요 청산 비율
+            effective: freed1Pct > 0, // 청산이 효과적인지
+          };
+        })
+        .filter(g => g.effective)
+        .sort((a, b) => b.freed1Pct - a.freed1Pct); // 효율순 정렬
+
+      // 추가 입금 필요 금액
+      const depositNeeded = shortfallAmt > 0 ? shortfallAmt : 0;
+
       if (freeMargin >= tgt) {
-        availCalc = { sufficient: true };
+        availCalc = { sufficient: true, closeGuide, depositNeeded: 0 };
       } else {
         const neededPrice = solvePriceForAvail(tgt);
         if (neededPrice != null) {
           const direction = neededPrice > cp ? "up" : "down";
           const changePct = ((neededPrice - cp) / cp) * 100;
-          availCalc = { sufficient: false, neededPrice, direction, changePct };
+          availCalc = { sufficient: false, neededPrice, direction, changePct, closeGuide, depositNeeded };
         } else {
           // 최대 확보 가능 금액 탐색 (샘플링)
           let maxAvail = freeMargin;
           let maxAvailPrice = cp;
           const samples = 200;
           for (let i = 0; i <= samples; i++) {
-            // 위쪽 탐색
-            const pUp = cp * (1 + (i / samples) * 10); // 0% ~ +1000%
+            const pUp = cp * (1 + (i / samples) * 10);
             const fUp = calcFreeMarginAt(pUp);
             if (fUp > maxAvail) { maxAvail = fUp; maxAvailPrice = pUp; }
-            // 아래쪽 탐색
-            const pDn = cp * (1 - (i / samples) * 0.99); // 0% ~ -99%
+            const pDn = cp * (1 - (i / samples) * 0.99);
             if (pDn > 0) {
               const fDn = calcFreeMarginAt(pDn);
               if (fDn > maxAvail) { maxAvail = fDn; maxAvailPrice = pDn; }
@@ -980,6 +1053,7 @@ export default function SimV4() {
             sufficient: false, impossible: true,
             maxAvail, maxAvailPrice, shortfall,
             maxChangePct: ((maxAvailPrice - cp) / cp) * 100,
+            closeGuide, depositNeeded,
           };
         }
       }
@@ -2490,6 +2564,7 @@ export default function SimV4() {
                 hedgeEntry={hedgeEntry} setHedgeEntry={setHedgeEntry}
                 hedgeMargin={hedgeMargin} setHedgeMargin={setHedgeMargin}
                 hedgeLev={hedgeLev} setHedgeLev={setHedgeLev}
+                hedgeLive={hedgeLive} setHedgeLive={setHedgeLive}
                 getCp={getCp}
               />
             )}
@@ -2558,7 +2633,7 @@ export default function SimV4() {
             <div style={S.availBox}>
               <div style={S.availRow}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>여유 마진 목표</div>
+                  <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>목표 사용 가능 금액</div>
                   <Inp value={targetAvail} onChange={setTargetAvail} ph="목표 금액 (USDT)" />
                 </div>
                 <div style={{ flex: 1, paddingLeft: 12, display: "flex", alignItems: "flex-end" }}>
@@ -2577,9 +2652,6 @@ export default function SimV4() {
                         </div>
                         <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>
                           (${fmt(calc.availCalc.maxAvailPrice)} · {fmtS(calc.availCalc.maxChangePct)}%)
-                        </div>
-                        <div style={{ fontSize: 10, color: "#f87171", marginTop: 2 }}>
-                          부족분 {fmt(calc.availCalc.shortfall)} USDT → 포지션 축소 필요
                         </div>
                       </div>
                     ) : (
@@ -2600,6 +2672,83 @@ export default function SimV4() {
                   )}
                 </div>
               </div>
+
+              {/* 달성 방법 가이드 */}
+              {calc.availCalc && !calc.availCalc.sufficient && (
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #1e1e2e" }}>
+                  <div style={{ fontSize: 10, color: "#0ea5e9", fontWeight: 700, letterSpacing: 1.5, fontFamily: "'DM Sans'", marginBottom: 10 }}>
+                    📊 달성 방법
+                  </div>
+
+                  {/* ① 필요 가격 요약 */}
+                  {calc.availCalc.neededPrice && (
+                    <div style={{ padding: "8px 10px", borderRadius: 6, background: "#0ea5e908", border: "1px solid #0ea5e922", marginBottom: 8, fontSize: 11, color: "#94a3b8" }}>
+                      <span style={{ color: "#0ea5e9", fontWeight: 600 }}>① 가격 변동</span>
+                      {" · "}{calc.calcRefCoin} → <span style={{ fontWeight: 600, color: "#e2e8f0" }}>${fmt(calc.availCalc.neededPrice)}</span>
+                      <span style={{ color: calc.availCalc.direction === "up" ? "#34d399" : "#f87171", marginLeft: 4 }}>
+                        ({fmtS(calc.availCalc.changePct)}%)
+                      </span>
+                    </div>
+                  )}
+                  {calc.availCalc.impossible && (
+                    <div style={{ padding: "8px 10px", borderRadius: 6, background: "#f8717108", border: "1px solid #f8717122", marginBottom: 8, fontSize: 11, color: "#f87171" }}>
+                      <span style={{ fontWeight: 600 }}>① 가격 변동</span> · 가격만으로 도달 불가
+                      <span style={{ color: "#94a3b8", marginLeft: 4 }}>
+                        (최대 {fmt(calc.availCalc.maxAvail)} USDT, 부족 {fmt(calc.availCalc.shortfall)} USDT)
+                      </span>
+                    </div>
+                  )}
+
+                  {/* ② 부분 청산 가이드 */}
+                  {calc.availCalc.closeGuide && calc.availCalc.closeGuide.length > 0 && (
+                    <div style={{ padding: "8px 10px", borderRadius: 6, background: "#f59e0b08", border: "1px solid #f59e0b22", marginBottom: 8 }}>
+                      <div style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600, marginBottom: 6 }}>② 부분 청산으로 확보</div>
+                      {calc.availCalc.closeGuide.map((g, gi) => (
+                        <div key={g.id} style={{
+                          display: "flex", justifyContent: "space-between", alignItems: "center",
+                          padding: "5px 0", borderBottom: gi < calc.availCalc.closeGuide.length - 1 ? "1px solid #1e1e2e" : "none",
+                          fontSize: 11,
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ color: g.dir === "long" ? "#34d399" : "#f87171", fontWeight: 600, fontSize: 10, width: 42 }}>
+                              {g.coin} {g.dirKr}
+                            </span>
+                            {g.neededPct !== null ? (
+                              <span style={{ color: "#e2e8f0" }}>
+                                <span style={{ fontWeight: 700, color: "#f59e0b" }}>{fmt(g.neededPct, 1)}%</span> 청산
+                              </span>
+                            ) : (
+                              <span style={{ color: "#6b7280" }}>전량으로도 부족</span>
+                            )}
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            {g.neededPct !== null ? (
+                              <span style={{ color: "#34d399", fontWeight: 600 }}>
+                                +{fmt(g.neededPct * g.freed1Pct)} USDT
+                              </span>
+                            ) : (
+                              <span style={{ color: "#94a3b8" }}>
+                                최대 +{fmt(g.maxFreed)} USDT
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{ fontSize: 9, color: "#4b5563", marginTop: 4, fontFamily: "'DM Sans'" }}>
+                        효율순 정렬 · 1% 당 확보 금액 기준
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ③ 추가 입금 */}
+                  {calc.availCalc.depositNeeded > 0 && (
+                    <div style={{ padding: "8px 10px", borderRadius: 6, background: "#34d39908", border: "1px solid #34d39922", fontSize: 11, color: "#94a3b8" }}>
+                      <span style={{ color: "#34d399", fontWeight: 600 }}>③ 추가 입금</span>
+                      {" · "}지갑에 <span style={{ fontWeight: 700, color: "#34d399" }}>{fmt(calc.availCalc.depositNeeded)} USDT</span> 입금 시 즉시 달성
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Liquidation info */}
@@ -4734,11 +4883,26 @@ function InputCalc({ pos, ep, lev, fee, onUpdate }) {
 }
 
 /* ═══ HEDGE PANEL (인라인) ═══ */
-function HedgePanel({ pos, calc, hedgeEntry, setHedgeEntry, hedgeMargin, setHedgeMargin, hedgeLev, setHedgeLev, getCp }) {
+function HedgePanel({ pos, calc, hedgeEntry, setHedgeEntry, hedgeMargin, setHedgeMargin, hedgeLev, setHedgeLev, hedgeLive, setHedgeLive, getCp }) {
   const hr = calc?.hedgeResult;
   const cp = getCp(pos.coin);
   const hedgeDirKr = pos.dir === "long" ? "숏" : "롱";
   const ac = "#a78bfa";
+
+  // 수동 입력 시 실시간 OFF
+  const handleManualEntry = (v) => {
+    setHedgeLive(false);
+    setHedgeEntry(v);
+  };
+  // 토글 ON/OFF
+  const toggleLive = () => {
+    if (hedgeLive) {
+      setHedgeLive(false);
+    } else {
+      setHedgeLive(true);
+      if (cp > 0) setHedgeEntry(String(cp));
+    }
+  };
 
   return (
     <div style={{
@@ -4753,8 +4917,23 @@ function HedgePanel({ pos, calc, hedgeEntry, setHedgeEntry, hedgeMargin, setHedg
       {/* 입력 */}
       <div style={S.grid2}>
         <Fld label={`${hedgeDirKr} 진입 예정가 ($)`}>
-          <PriceInp value={hedgeEntry} onChange={setHedgeEntry} ph="헷지 진입가"
-            cp={cp} mode={pos.dir === "long" ? "dca-short" : "dca-long"} accentColor={ac} />
+          <div style={{ position: "relative" }}>
+            <PriceInp value={hedgeEntry} onChange={handleManualEntry} ph="헷지 진입가"
+              cp={cp} mode={pos.dir === "long" ? "dca-short" : "dca-long"} accentColor={ac} />
+            {/* 실시간 토글 */}
+            <button onClick={toggleLive} style={{
+              position: "absolute", top: 0, right: 0,
+              padding: "5px 8px", fontSize: 9, fontWeight: 700,
+              borderRadius: "0 8px 0 6px",
+              border: `1px solid ${hedgeLive ? "#34d39944" : "#1e1e2e"}`,
+              background: hedgeLive ? "#34d39915" : "transparent",
+              color: hedgeLive ? "#34d399" : "#6b7280",
+              cursor: "pointer", fontFamily: "'DM Sans'", transition: "all 0.15s",
+              zIndex: 1,
+            }}>
+              {hedgeLive ? "● LIVE" : "○ 수동"}
+            </button>
+          </div>
         </Fld>
         <Fld label="투입금액 (USDT)">
           <Inp value={hedgeMargin} onChange={setHedgeMargin} ph="투입금액" />
