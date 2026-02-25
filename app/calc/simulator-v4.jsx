@@ -2975,15 +2975,15 @@ export default function SimV4() {
                                   g.costRatio > 0 && <span style={{ marginLeft: 3 }}>(1$ 당 {fmt(g.costRatio, 2)}$ 손실)</span>
                                 )}
                               </span>
-                              {g.liqDistChange != null ? (
+                              {g.liqDistChange != null && g.newLiq != null && calc.exLiq > 0 ? (
                                 <span>
-                                  청산가 여유 <span style={{ color: "#94a3b8" }}>{fmt(Math.abs(g.curLiqDist), 1)}%</span>
+                                  청산가 <span style={{ color: "#94a3b8" }}>${fmt(calc.exLiq)}</span>
                                   {" → "}
                                   <span style={{ color: Math.abs(g.newLiqDist) > Math.abs(g.curLiqDist) ? "#34d399" : "#f87171", fontWeight: 600 }}>
-                                    {fmt(Math.abs(g.newLiqDist), 1)}%
+                                    ${fmt(g.newLiq)}
                                   </span>
-                                  <span style={{ color: g.liqDistChange >= 0 ? "#34d399" : "#f87171", marginLeft: 3 }}>
-                                    ({fmtS(g.liqDistChange, 1)}%p)
+                                  <span style={{ color: "#6b7280", marginLeft: 3 }}>
+                                    (여유 {fmt(Math.abs(g.curLiqDist), 1)}% → {fmt(Math.abs(g.newLiqDist), 1)}%)
                                   </span>
                                 </span>
                               ) : g.liqSafetyTag === "unknown" ? (
