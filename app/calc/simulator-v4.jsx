@@ -1093,7 +1093,7 @@ export default function SimV4() {
 
           let freed1Pct;
           if (p.pnl < 0) {
-            freed1Pct = margin1Pct + Math.abs(pnl1Pct) - closeFee1Pct;
+            freed1Pct = margin1Pct - closeFee1Pct;
           } else {
             freed1Pct = margin1Pct + pnl1Pct - closeFee1Pct;
           }
