@@ -2953,15 +2953,18 @@ export default function SimV4() {
                                 </span>
                               )}
                             </div>
-                            {/* 2줄: 청산% + 확보금액 */}
+                            {/* 2줄: 청산% + 확보금액 + 마진 변화 */}
                             <div style={{ fontSize: 11, marginTop: 4 }}>
                               {g.neededPct !== null ? (
                                 <span style={{ color: "#e2e8f0" }}>
                                   <span style={{ fontWeight: 700, color: "#f59e0b" }}>{fmt(g.neededPct, 1)}%</span> 청산 → <span style={{ color: "#34d399", fontWeight: 600 }}>+{fmt(g.neededPct * g.freed1Pct)} USDT</span> 확보
+                                  <span style={{ color: "#6b7280", marginLeft: 6 }}>
+                                    · 마진 {fmt(g.margin)} → <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{fmt(g.margin * (1 - g.neededPct / 100))}</span>
+                                  </span>
                                 </span>
                               ) : (
                                 <span style={{ color: "#6b7280" }}>
-                                  전량 청산해도 부족 <span style={{ color: "#94a3b8" }}>(최대 +{fmt(g.maxFreed)} USDT)</span>
+                                  전량 청산해도 부족 <span style={{ color: "#94a3b8" }}>(최대 +{fmt(g.maxFreed)} USDT · 마진 {fmt(g.margin)} → 0)</span>
                                 </span>
                               )}
                             </div>
