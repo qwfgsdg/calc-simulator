@@ -973,16 +973,40 @@ export default function SimV4() {
     if (tgt > 0 && parsed.length > 0 && cp > 0) {
       const shortfallAmt = tgt - freeMargin; // 부족분
 
+      // ── 부분 청산 후 강제청산가 시뮬레이션 헬퍼 ──
+      const simLiqAfterClose = (targetPos, closePct) => {
+        if (!mmRate || closePct <= 0) return null;
+        const ratio = closePct / 100;
+        const realizedPnL = targetPos.pnl * ratio;
+        const closeFeeAmt = targetPos.qty * ratio * targetPos.pcp * fee;
+        const wbAfter = wb + realizedPnL - closeFeeAmt;
+
+        const simParsed = parsed.map(p =>
+          p.id === targetPos.id
+            ? { ...p, qty: p.qty * (1 - ratio), mg: p.mg * (1 - ratio) }
+            : p
+        ).filter(p => p.qty > 1e-10);
+
+        if (simParsed.length === 0) return null;
+
+        const sumSignQty = simParsed.reduce((a, p) => a + p.sign * p.qty, 0);
+        const sumSignEpQty = simParsed.reduce((a, p) => a + p.sign * p.ep * p.qty, 0);
+        const sumQty = simParsed.reduce((a, p) => a + p.qty, 0);
+        const denom = mmRate * sumQty - sumSignQty;
+        if (Math.abs(denom) < 1e-12) return null;
+        const liq = (wbAfter - sumSignEpQty) / denom;
+        return liq > 0 ? liq : null;
+      };
+
       // ── 부분 청산 가이드 (모든 경우 계산) ──
       const closeGuide = parsed
         .filter(p => p.pcp > 0 && p.qty > 0)
         .map(p => {
-          const closeFee1Pct = p.qty * 0.01 * p.pcp * fee; // 1% 청산 수수료
+          const closeFee1Pct = p.qty * 0.01 * p.pcp * fee;
           const pnl1Pct = p.pnl * 0.01;
           const margin1Pct = p.mg * 0.01;
           const isProfitable = p.pnl >= 0;
 
-          // 사용 가능 확보 (Bybit available 변화)
           let freed1Pct;
           if (p.pnl < 0) {
             freed1Pct = margin1Pct + Math.abs(pnl1Pct) - closeFee1Pct;
@@ -990,7 +1014,6 @@ export default function SimV4() {
             freed1Pct = margin1Pct + pnl1Pct - closeFee1Pct;
           }
 
-          // 잔고 변화 = 실현PnL − 청산수수료 (실제 지갑에서 빠지거나 들어오는 금액)
           const balChange1Pct = pnl1Pct - closeFee1Pct;
 
           const maxFreed = freed1Pct * 100;
@@ -998,14 +1021,31 @@ export default function SimV4() {
           if (neededPct !== null && neededPct > 100) neededPct = null;
           const neededPctClamped = neededPct !== null ? Math.ceil(neededPct * 10) / 10 : null;
 
-          // 목표 달성 시 잔고 변화 / 전량 청산 시 잔고 변화
           const balChangeNeeded = neededPctClamped !== null ? balChange1Pct * neededPctClamped : null;
           const balChangeMax = balChange1Pct * 100;
 
-          // 확보 1$ 당 잔고 비용 (이익 포지션은 0)
           const costRatio = (!isProfitable && freed1Pct > 0)
             ? Math.abs(balChange1Pct) / freed1Pct
             : 0;
+
+          // ── 강제청산가 시뮬레이션 ──
+          const simPct = neededPctClamped !== null ? neededPctClamped : 100;
+          const newLiq = simLiqAfterClose(p, simPct);
+          const curLiqDist = liqDistPct;
+          let newLiqDist = null;
+          let liqDistChange = null;
+          if (newLiq != null && cp > 0) {
+            newLiqDist = ((cp - newLiq) / cp) * 100;
+            if (curLiqDist != null) {
+              liqDistChange = Math.abs(newLiqDist) - Math.abs(curLiqDist);
+            }
+          }
+          let liqSafetyTag = "unknown";
+          if (liqDistChange != null) {
+            if (liqDistChange >= -1) liqSafetyTag = "safe";
+            else if (liqDistChange >= -5) liqSafetyTag = "caution";
+            else liqSafetyTag = "danger";
+          }
 
           return {
             id: p.id, coin: p.coin, dir: p.dir,
@@ -1017,15 +1057,18 @@ export default function SimV4() {
             neededPct: neededPctClamped,
             balChange1Pct, balChangeNeeded, balChangeMax,
             costRatio,
+            newLiq, newLiqDist, curLiqDist, liqDistChange, liqSafetyTag, simPct,
             effective: freed1Pct > 0,
           };
         })
         .filter(g => g.effective)
-        // 정렬: 이익 포지션 우선 → 이익 내 확보 높은 순 → 손실 내 비용 적은 순
+        // 정렬: 청산가 안전 등급 우선 → 비용 적은 순 → 확보 많은 순
         .sort((a, b) => {
-          if (a.isProfitable !== b.isProfitable) return a.isProfitable ? -1 : 1;
-          if (a.isProfitable) return b.freed1Pct - a.freed1Pct;
-          return a.costRatio - b.costRatio;
+          const tier = { safe: 0, unknown: 1, caution: 2, danger: 3 };
+          const tierDiff = tier[a.liqSafetyTag] - tier[b.liqSafetyTag];
+          if (tierDiff !== 0) return tierDiff;
+          if (a.costRatio !== b.costRatio) return a.costRatio - b.costRatio;
+          return b.freed1Pct - a.freed1Pct;
         });
 
       // 첫 번째 항목에 추천 표시
@@ -2716,58 +2759,87 @@ export default function SimV4() {
                         const isLast = gi === calc.availCalc.closeGuide.length - 1;
                         const balVal = g.neededPct !== null ? g.balChangeNeeded : g.balChangeMax;
                         const balColor = balVal >= 0 ? "#34d399" : "#f87171";
+                        const safetyStyle = {
+                          safe: { bg: "#34d39915", color: "#34d399", border: "#34d39933", icon: "🛡", label: "안전" },
+                          caution: { bg: "#f59e0b15", color: "#f59e0b", border: "#f59e0b33", icon: "⚠", label: "주의" },
+                          danger: { bg: "#f8717115", color: "#f87171", border: "#f8717133", icon: "🔴", label: "위험" },
+                        }[g.liqSafetyTag] || null;
                         return (
                           <div key={g.id} style={{
                             padding: "8px 0", borderBottom: isLast ? "none" : "1px solid #1e1e2e",
                           }}>
-                            {/* 1줄: 코인/방향 + 태그 + 청산% + 확보금액 */}
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                                {g.isRecommended && (
-                                  <span style={{
-                                    fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 3,
-                                    background: "#0ea5e920", color: "#0ea5e9", border: "1px solid #0ea5e944",
-                                    fontFamily: "'DM Sans'",
-                                  }}>추천</span>
-                                )}
-                                <span style={{ color: g.dir === "long" ? "#34d399" : "#f87171", fontWeight: 600, fontSize: 10 }}>
-                                  {g.coin} {g.dirKr}
-                                </span>
+                            {/* 1줄: 코인/방향 + PnL태그 + 청산가태그 */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                              {g.isRecommended && (
+                                <span style={{
+                                  fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 3,
+                                  background: "#0ea5e920", color: "#0ea5e9", border: "1px solid #0ea5e944",
+                                  fontFamily: "'DM Sans'",
+                                }}>추천</span>
+                              )}
+                              <span style={{ color: g.dir === "long" ? "#34d399" : "#f87171", fontWeight: 600, fontSize: 10 }}>
+                                {g.coin} {g.dirKr}
+                              </span>
+                              <span style={{
+                                fontSize: 8, fontWeight: 600, padding: "1px 4px", borderRadius: 3,
+                                background: g.isProfitable ? "#34d39915" : "#f8717115",
+                                color: g.isProfitable ? "#34d399" : "#f87171",
+                                border: `1px solid ${g.isProfitable ? "#34d39933" : "#f8717133"}`,
+                              }}>
+                                {g.isProfitable ? "✨ 무손실" : "💸 손실확정"}
+                              </span>
+                              {safetyStyle && (
                                 <span style={{
                                   fontSize: 8, fontWeight: 600, padding: "1px 4px", borderRadius: 3,
-                                  background: g.isProfitable ? "#34d39915" : "#f8717115",
-                                  color: g.isProfitable ? "#34d399" : "#f87171",
-                                  border: `1px solid ${g.isProfitable ? "#34d39933" : "#f8717133"}`,
+                                  background: safetyStyle.bg, color: safetyStyle.color,
+                                  border: `1px solid ${safetyStyle.border}`,
                                 }}>
-                                  {g.isProfitable ? "✨ 무손실" : "💸 손실확정"}
+                                  {safetyStyle.icon} 청산가 {safetyStyle.label}
                                 </span>
-                              </div>
-                              <div style={{ textAlign: "right" }}>
-                                {g.neededPct !== null ? (
-                                  <span style={{ color: "#e2e8f0" }}>
-                                    <span style={{ fontWeight: 700, color: "#f59e0b" }}>{fmt(g.neededPct, 1)}%</span> 청산 → <span style={{ color: "#34d399", fontWeight: 600 }}>+{fmt(g.neededPct * g.freed1Pct)} USDT</span>
-                                  </span>
-                                ) : (
-                                  <span style={{ color: "#6b7280" }}>
-                                    전량으로도 부족 <span style={{ color: "#94a3b8" }}>(최대 +{fmt(g.maxFreed)})</span>
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            {/* 2줄: 잔고 변화 + 비용 설명 */}
-                            <div style={{ fontSize: 10, color: "#6b7280", marginTop: 3, paddingLeft: g.isRecommended ? 38 : 0 }}>
-                              잔고 <span style={{ color: balColor, fontWeight: 600 }}>{fmtS(balVal)} USDT</span>
-                              {g.isProfitable ? (
-                                <span style={{ marginLeft: 4 }}>(수수료만 차감)</span>
-                              ) : (
-                                g.costRatio > 0 && <span style={{ marginLeft: 4 }}>(확보 1$ 당 {fmt(g.costRatio, 2)}$ 손실)</span>
                               )}
+                            </div>
+                            {/* 2줄: 청산% + 확보금액 */}
+                            <div style={{ fontSize: 11, marginTop: 4 }}>
+                              {g.neededPct !== null ? (
+                                <span style={{ color: "#e2e8f0" }}>
+                                  <span style={{ fontWeight: 700, color: "#f59e0b" }}>{fmt(g.neededPct, 1)}%</span> 청산 → <span style={{ color: "#34d399", fontWeight: 600 }}>+{fmt(g.neededPct * g.freed1Pct)} USDT</span> 확보
+                                </span>
+                              ) : (
+                                <span style={{ color: "#6b7280" }}>
+                                  전량 청산해도 부족 <span style={{ color: "#94a3b8" }}>(최대 +{fmt(g.maxFreed)} USDT)</span>
+                                </span>
+                              )}
+                            </div>
+                            {/* 3줄: 잔고 변화 + 청산가 여유 변화 */}
+                            <div style={{ fontSize: 10, color: "#6b7280", marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <span>
+                                잔고 <span style={{ color: balColor, fontWeight: 600 }}>{fmtS(balVal)} USDT</span>
+                                {g.isProfitable ? (
+                                  <span style={{ marginLeft: 3 }}>(수수료만 차감)</span>
+                                ) : (
+                                  g.costRatio > 0 && <span style={{ marginLeft: 3 }}>(1$ 당 {fmt(g.costRatio, 2)}$ 손실)</span>
+                                )}
+                              </span>
+                              {g.liqDistChange != null ? (
+                                <span>
+                                  청산가 여유 <span style={{ color: "#94a3b8" }}>{fmt(Math.abs(g.curLiqDist), 1)}%</span>
+                                  {" → "}
+                                  <span style={{ color: Math.abs(g.newLiqDist) > Math.abs(g.curLiqDist) ? "#34d399" : "#f87171", fontWeight: 600 }}>
+                                    {fmt(Math.abs(g.newLiqDist), 1)}%
+                                  </span>
+                                  <span style={{ color: g.liqDistChange >= 0 ? "#34d399" : "#f87171", marginLeft: 3 }}>
+                                    ({fmtS(g.liqDistChange, 1)}%p)
+                                  </span>
+                                </span>
+                              ) : g.liqSafetyTag === "unknown" ? (
+                                <span style={{ color: "#333" }}>청산가 미입력</span>
+                              ) : null}
                             </div>
                           </div>
                         );
                       })}
                       <div style={{ fontSize: 9, color: "#4b5563", marginTop: 4, fontFamily: "'DM Sans'" }}>
-                        이익 포지션 우선 · 손실 포지션은 비용 효율순
+                        안전 등급순 · 청산가 시뮬레이션 기반
                       </div>
                     </div>
                   )}
