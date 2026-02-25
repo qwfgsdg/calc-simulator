@@ -930,6 +930,90 @@ export default function SimV4() {
       return wb + lossPnL - tMg;
     };
 
+    // ── 코인별 가격 변동 freeMargin 계산 (임의 코인 대응) ──
+    const calcFreeMarginAtCoin = (P, coin) => {
+      const tMg = parsed.reduce((a, p) => a + p.mg, 0);
+      const lossPnL = parsed.reduce((a, p) => {
+        const priceForP = p.coin === coin ? P : p.pcp;
+        const pnl2 = priceForP > 0 ? p.sign * (priceForP - p.ep) * p.qty : 0;
+        return a + Math.min(pnl2, 0);
+      }, 0);
+      return wb + lossPnL - tMg;
+    };
+
+    // ── 코인별 가격 변동 분석 ──
+    const analyzeCoins = (target) => {
+      const coins = [...new Set(parsed.map(p => p.coin))];
+      return coins.map(coin => {
+        const coinCp2 = parsed.find(p => p.coin === coin)?.pcp || 0;
+        if (coinCp2 <= 0) return null;
+
+        const coinPositions = parsed.filter(p => p.coin === coin);
+        const hasLong = coinPositions.some(p => p.dir === "long");
+        const hasShort = coinPositions.some(p => p.dir === "short");
+        const isHedged = hasLong && hasShort;
+
+        // bisect 양방향
+        const bisectCoin = (lo, hi) => {
+          const fLo = calcFreeMarginAtCoin(lo, coin);
+          const fHi = calcFreeMarginAtCoin(hi, coin);
+          if (fLo < target && fHi < target) return null;
+          let a2 = lo, b2 = hi;
+          if (calcFreeMarginAtCoin(a2, coin) >= target) [a2, b2] = [b2, a2];
+          for (let i = 0; i < 80; i++) {
+            const mid = (a2 + b2) / 2;
+            if (calcFreeMarginAtCoin(mid, coin) < target) a2 = mid; else b2 = mid;
+          }
+          const result = (a2 + b2) / 2;
+          return result > 0 ? result : null;
+        };
+
+        const upR = bisectCoin(coinCp2, coinCp2 * 200);
+        const dnR = bisectCoin(0.001, coinCp2);
+        let neededPrice2 = null;
+        if (upR != null && dnR != null) {
+          neededPrice2 = Math.abs(upR - coinCp2) < Math.abs(dnR - coinCp2) ? upR : dnR;
+        } else {
+          neededPrice2 = upR != null ? upR : dnR;
+        }
+
+        // maxGain 샘플링 + kink points
+        let maxAvail2 = calcFreeMarginAtCoin(coinCp2, coin);
+        let maxAvailPrice2 = coinCp2;
+        const samples2 = 100;
+        for (let i = 0; i <= samples2; i++) {
+          const pUp = coinCp2 * (1 + (i / samples2) * 10);
+          const fUp = calcFreeMarginAtCoin(pUp, coin);
+          if (fUp > maxAvail2) { maxAvail2 = fUp; maxAvailPrice2 = pUp; }
+          const pDn = coinCp2 * (1 - (i / samples2) * 0.99);
+          if (pDn > 0) {
+            const fDn = calcFreeMarginAtCoin(pDn, coin);
+            if (fDn > maxAvail2) { maxAvail2 = fDn; maxAvailPrice2 = pDn; }
+          }
+        }
+        coinPositions.forEach(p => {
+          if (p.ep > 0) {
+            [p.ep * 0.999, p.ep, p.ep * 1.001].forEach(kp => {
+              const f2 = calcFreeMarginAtCoin(kp, coin);
+              if (f2 > maxAvail2) { maxAvail2 = f2; maxAvailPrice2 = kp; }
+            });
+          }
+        });
+
+        const maxGain = maxAvail2 - freeMargin;
+
+        return {
+          coin, coinCp: coinCp2, isHedged, neededPrice: neededPrice2,
+          changePct: neededPrice2 ? ((neededPrice2 - coinCp2) / coinCp2) * 100 : null,
+          maxGain, maxAvail: maxAvail2, maxAvailPrice: maxAvailPrice2,
+          maxChangePct: ((maxAvailPrice2 - coinCp2) / coinCp2) * 100,
+          reason: isHedged && maxGain < 5
+            ? "양방향 포지션 — 가격 효과 상쇄"
+            : neededPrice2 ? "도달 가능" : maxGain < 1 ? "가격 변동 효과 미미" : null,
+        };
+      }).filter(Boolean);
+    };
+
     const solvePriceForAvail = (target, posArr, extraMargin = 0) => {
       if (!cp || cp <= 0) return null;
       const cur = calcFreeMarginAt(cp, posArr, extraMargin);
@@ -1080,13 +1164,18 @@ export default function SimV4() {
       if (freeMargin >= tgt) {
         availCalc = { sufficient: true, closeGuide, depositNeeded: 0 };
       } else {
+        // 코인별 가격 분석
+        const coinAnalysis = analyzeCoins(tgt);
+        const hedgeDetected = coinAnalysis.some(c => c.isHedged);
+        const bestCoinSolution = coinAnalysis.find(c => c.neededPrice != null);
+
         const neededPrice = solvePriceForAvail(tgt);
         if (neededPrice != null) {
           const direction = neededPrice > cp ? "up" : "down";
           const changePct = ((neededPrice - cp) / cp) * 100;
-          availCalc = { sufficient: false, neededPrice, direction, changePct, closeGuide, depositNeeded };
+          availCalc = { sufficient: false, neededPrice, direction, changePct, closeGuide, depositNeeded, coinAnalysis, hedgeDetected, bestCoinSolution };
         } else {
-          // 최대 확보 가능 금액 탐색 (샘플링)
+          // 최대 확보 가능 금액 탐색 (샘플링 + kink points)
           let maxAvail = freeMargin;
           let maxAvailPrice = cp;
           const samples = 200;
@@ -1100,13 +1189,34 @@ export default function SimV4() {
               if (fDn > maxAvail) { maxAvail = fDn; maxAvailPrice = pDn; }
             }
           }
-          const shortfall = tgt - maxAvail;
-          availCalc = {
-            sufficient: false, impossible: true,
-            maxAvail, maxAvailPrice, shortfall,
-            maxChangePct: ((maxAvailPrice - cp) / cp) * 100,
-            closeGuide, depositNeeded,
-          };
+          // kink points: calcRefCoin 포지션들의 진입가 (freeMargin이 꺾이는 정확한 지점)
+          parsed.forEach(p => {
+            if (p.coin === calcRefCoin && p.ep > 0) {
+              [p.ep * 0.999, p.ep, p.ep * 1.001].forEach(kp => {
+                const fk = calcFreeMarginAt(kp);
+                if (fk > maxAvail) { maxAvail = fk; maxAvailPrice = kp; }
+              });
+            }
+          });
+
+          // kink 보강 후 다시 해 탐색 (maxAvail이 tgt 이상이 되었을 수 있음)
+          if (maxAvail >= tgt) {
+            // 정확한 해를 bisect으로 다시 찾기
+            availCalc = {
+              sufficient: false, neededPrice: maxAvailPrice,
+              direction: maxAvailPrice > cp ? "up" : "down",
+              changePct: ((maxAvailPrice - cp) / cp) * 100,
+              closeGuide, depositNeeded, coinAnalysis, hedgeDetected, bestCoinSolution,
+            };
+          } else {
+            const shortfall = tgt - maxAvail;
+            availCalc = {
+              sufficient: false, impossible: true,
+              maxAvail, maxAvailPrice, shortfall,
+              maxChangePct: ((maxAvailPrice - cp) / cp) * 100,
+              closeGuide, depositNeeded, coinAnalysis, hedgeDetected, bestCoinSolution,
+            };
+          }
         }
       }
     }
@@ -2732,8 +2842,8 @@ export default function SimV4() {
                     📊 달성 방법
                   </div>
 
-                  {/* ① 필요 가격 요약 */}
-                  {calc.availCalc.neededPrice && (
+                  {/* ① 가격 변동 분석 */}
+                  {calc.availCalc.neededPrice && !calc.availCalc.impossible && (!calc.availCalc.coinAnalysis || calc.availCalc.coinAnalysis.length <= 1) && (
                     <div style={{ padding: "8px 10px", borderRadius: 6, background: "#0ea5e908", border: "1px solid #0ea5e922", marginBottom: 8, fontSize: 11, color: "#94a3b8" }}>
                       <span style={{ color: "#0ea5e9", fontWeight: 600 }}>① 가격 변동</span>
                       {" · "}{calc.calcRefCoin} → <span style={{ fontWeight: 600, color: "#e2e8f0" }}>${fmt(calc.availCalc.neededPrice)}</span>
@@ -2742,12 +2852,57 @@ export default function SimV4() {
                       </span>
                     </div>
                   )}
-                  {calc.availCalc.impossible && (
+                  {(calc.availCalc.impossible || (calc.availCalc.coinAnalysis && calc.availCalc.coinAnalysis.length > 1)) && (
+                    <div style={{ padding: "8px 10px", borderRadius: 6, background: calc.availCalc.bestCoinSolution ? "#0ea5e908" : "#f8717108", border: `1px solid ${calc.availCalc.bestCoinSolution ? "#0ea5e922" : "#f8717122"}`, marginBottom: 8, fontSize: 11 }}>
+                      <div style={{ color: "#0ea5e9", fontWeight: 600, marginBottom: 6 }}>① 가격 변동 분석</div>
+                      {calc.availCalc.coinAnalysis && calc.availCalc.coinAnalysis.map(ca => (
+                        <div key={ca.coin} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 0", borderBottom: "1px solid #0e0e18" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                            <span style={{ fontWeight: 600, color: "#e2e8f0", fontSize: 10, width: 32 }}>{ca.coin}</span>
+                            {ca.isHedged && (
+                              <span style={{ fontSize: 8, padding: "1px 4px", borderRadius: 3, background: "#f59e0b15", color: "#f59e0b", border: "1px solid #f59e0b33", fontWeight: 600 }}>양방향</span>
+                            )}
+                          </div>
+                          <div style={{ textAlign: "right", color: "#94a3b8" }}>
+                            {ca.neededPrice ? (
+                              <span>
+                                <span style={{ color: "#34d399", fontWeight: 600 }}>${fmt(ca.neededPrice)}</span>
+                                <span style={{ color: ca.changePct >= 0 ? "#34d399" : "#f87171", marginLeft: 3 }}>({fmtS(ca.changePct)}%)</span>
+                              </span>
+                            ) : ca.reason === "양방향 포지션 — 가격 효과 상쇄" ? (
+                              <span style={{ color: "#f59e0b" }}>상쇄 · 최대 +{fmt(ca.maxGain)} USDT</span>
+                            ) : (
+                              <span style={{ color: "#6b7280" }}>최대 +{fmt(ca.maxGain)} USDT</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {/* 결론 */}
+                      <div style={{ marginTop: 6, fontSize: 10 }}>
+                        {calc.availCalc.bestCoinSolution ? (
+                          <span style={{ color: "#0ea5e9", fontWeight: 600 }}>
+                            💡 {calc.availCalc.bestCoinSolution.coin} 가격 변동으로 달성 가능
+                          </span>
+                        ) : calc.availCalc.impossible ? (
+                          <span style={{ color: "#f87171" }}>
+                            가격만으로 도달 불가 · 부족 <span style={{ fontWeight: 600 }}>{fmt(calc.availCalc.shortfall)} USDT</span>
+                            {calc.availCalc.hedgeDetected && <span style={{ color: "#f59e0b", marginLeft: 4 }}>(양방향 포지션으로 가격 효과 제한)</span>}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  )}
+                  {calc.availCalc.impossible && (!calc.availCalc.coinAnalysis || calc.availCalc.coinAnalysis.length <= 1) && (
                     <div style={{ padding: "8px 10px", borderRadius: 6, background: "#f8717108", border: "1px solid #f8717122", marginBottom: 8, fontSize: 11, color: "#f87171" }}>
                       <span style={{ fontWeight: 600 }}>① 가격 변동</span> · 가격만으로 도달 불가
                       <span style={{ color: "#94a3b8", marginLeft: 4 }}>
                         (최대 {fmt(calc.availCalc.maxAvail)} USDT, 부족 {fmt(calc.availCalc.shortfall)} USDT)
                       </span>
+                      {calc.availCalc.hedgeDetected && (
+                        <div style={{ marginTop: 3, color: "#f59e0b", fontSize: 10 }}>
+                          ⚠ 양방향 포지션으로 가격 변동 효과가 상쇄됩니다
+                        </div>
+                      )}
                     </div>
                   )}
 
