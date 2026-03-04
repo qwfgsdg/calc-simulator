@@ -2375,9 +2375,9 @@ export default function SimV4() {
             <div style={{ ...S.hdrDot, background: activeColor, boxShadow: `0 0 8px ${activeColor}44` }} />
             <span style={S.hdrBadge}>CROSS MARGIN · FUTURES</span>
           </div>
-          <h1 style={S.hdrTitle}>물타기 · 불타기 시뮬레이터</h1>
+          <h1 style={S.hdrTitle}>POSITION LAB</h1>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-            <p style={S.hdrSub}>다중 포지션 · 평단가 · 청산가 · 역계산 · 양방향 전략</p>
+            <p style={S.hdrSub}></p>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {saveStatus === "saved" && (
                 <span style={{ fontSize: 9, color: "#34d399", fontFamily: "'DM Sans'" }}>
@@ -4286,7 +4286,7 @@ export default function SimV4() {
         })()}
 
         <div style={S.footer}>
-          교차 마진 · 거래소 청산가 기반 추정 · 수수료 왕복 · 펀딩비 미반영
+          교차 마진 · 수수료 왕복 · 펀딩비 미반영
         </div>
 
         </>)}
