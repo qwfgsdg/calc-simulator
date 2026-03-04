@@ -214,6 +214,7 @@ export default function SimV4() {
   const [activeProfileId, setActiveProfileId] = useState(null);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [profileModal, setProfileModal] = useState(null); // null | "create" | "rename"
+  const [guideOpen, setGuideOpen] = useState(false);
   const [profileModalName, setProfileModalName] = useState("");
   const [profileModalColor, setProfileModalColor] = useState("emerald");
   const profileDropdownRef = useRef(null);
@@ -2389,6 +2390,13 @@ export default function SimV4() {
                   저장 중...
                 </span>
               )}
+              <button onClick={() => setGuideOpen(true)} style={{
+                fontSize: 9, padding: "3px 8px", borderRadius: 4,
+                border: "1px solid #1e1e2e", background: "transparent",
+                color: "#4b5563", cursor: "pointer", fontFamily: "'DM Sans'",
+              }} title="사용 가이드">
+                ?
+              </button>
               <button onClick={handleReset} style={{
                 fontSize: 9, padding: "3px 8px", borderRadius: 4,
                 border: "1px solid #1e1e2e", background: "transparent",
@@ -2599,6 +2607,182 @@ export default function SimV4() {
             </div>
           )}
         </div>
+
+        {/* ══════ GUIDE MODAL ══════ */}
+        {guideOpen && (
+          <div style={{
+            position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+            background: "#000000cc", zIndex: 300,
+            display: "flex", alignItems: "flex-start", justifyContent: "center",
+            padding: 20, overflowY: "auto",
+          }} onClick={() => setGuideOpen(false)}>
+            <div style={{
+              width: "100%", maxWidth: 520, margin: "40px 0", padding: 0, borderRadius: 16,
+              background: "#0c0c16", border: "1px solid #1e1e2e",
+              boxShadow: "0 20px 60px #000000cc",
+              fontFamily: "'DM Sans'", overflow: "hidden",
+            }} onClick={(e) => e.stopPropagation()}>
+
+              {/* Header */}
+              <div style={{ padding: "24px 24px 16px", borderBottom: "1px solid #1e1e2e" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "#f1f5f9", letterSpacing: -0.5 }}>POSITION LAB</div>
+                    <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>사용 가이드</div>
+                  </div>
+                  <button onClick={() => setGuideOpen(false)} style={{
+                    background: "transparent", border: "none", color: "#4b5563",
+                    fontSize: 18, cursor: "pointer", padding: "0 4px", lineHeight: 1,
+                  }}>✕</button>
+                </div>
+                <div style={{
+                  fontSize: 9, color: "#4b5563", marginTop: 12, lineHeight: 1.6,
+                  padding: "8px 10px", borderRadius: 6, background: "#08080f", border: "1px solid #141420",
+                }}>
+                  본 도구는 공개된 수학 공식을 기반으로 한 포지션 계산기이며, 투자 자문·매매 권유·수익 보장의 목적이 아닙니다. 모든 거래 판단과 책임은 이용자 본인에게 있으며, 본 도구의 결과를 근거로 발생한 손실에 대해 제작자 및 제공자는 어떠한 책임도 지지 않습니다.
+                </div>
+              </div>
+
+              {/* Guide Content */}
+              <div style={{ padding: "16px 24px 24px" }}>
+
+                {/* 기능 1 */}
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: "#0ea5e915", border: "1px solid #0ea5e933", color: "#0ea5e9", fontSize: 10, fontWeight: 800 }}>1</span>
+                    사용 가능 금액 실시간 확인
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.7, paddingLeft: 28 }}>
+                    <div style={{ color: "#9ca3af", fontWeight: 600, marginBottom: 4 }}>언제 쓰나요?</div>
+                    사용 가능 금액을 확인할 때
+                    <div style={{ marginTop: 8 }}>
+                      <table style={{ width: "100%", fontSize: 10, borderCollapse: "collapse" }}>
+                        <tbody>
+                          {[
+                            ["총 미실현 PnL", "전체 포지션 손익 합계"],
+                            ["유효 잔고 (Equity)", "지갑 잔고 + 미실현 PnL"],
+                            ["사용 마진", "포지션에 묶인 마진 합계"],
+                            ["사용 가능", "지금 바로 쓸 수 있는 여유 금액"],
+                          ].map(([k, v], i) => (
+                            <tr key={i} style={{ borderBottom: "1px solid #141420" }}>
+                              <td style={{ padding: "5px 8px", color: "#9ca3af", whiteSpace: "nowrap" }}>{k}</td>
+                              <td style={{ padding: "5px 8px", color: "#6b7280" }}>{v}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ height: 1, background: "#1e1e2e", margin: "0 0 20px 28px" }} />
+
+                {/* 기능 2 */}
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: "#0ea5e915", border: "1px solid #0ea5e933", color: "#0ea5e9", fontSize: 10, fontWeight: 800 }}>2</span>
+                    목표 사용 가능 금액
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.7, paddingLeft: 28 }}>
+                    <div style={{ color: "#9ca3af", fontWeight: 600, marginBottom: 4 }}>언제 쓰나요?</div>
+                    예시: 현재 사용가능 금액이 300 USDT밖에 없는데<br />
+                    "추가 진입하려면 1,500 USDT가 필요한데, 가격이 얼마나 올라야 확보할 수 있지?" 할 때
+                    <div style={{ color: "#9ca3af", fontWeight: 600, marginTop: 10, marginBottom: 4 }}>사용 방법</div>
+                    목표 사용 가능 금액 입력 → 3가지 달성 방법 자동 표시
+                    <div style={{ marginTop: 8 }}>
+                      <table style={{ width: "100%", fontSize: 10, borderCollapse: "collapse" }}>
+                        <tbody>
+                          {[
+                            ["① 가격 변동", "가격이 얼마가 되면 목표 금액에 도달하는지"],
+                            ["② 부분 청산", "어떤 포지션을 몇 % 닫으면 확보 가능한지"],
+                            ["③ 추가 입금", "얼마를 입금하면 즉시 달성되는지"],
+                          ].map(([k, v], i) => (
+                            <tr key={i} style={{ borderBottom: "1px solid #141420" }}>
+                              <td style={{ padding: "5px 8px", color: "#9ca3af", whiteSpace: "nowrap" }}>{k}</td>
+                              <td style={{ padding: "5px 8px", color: "#6b7280" }}>{v}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ height: 1, background: "#1e1e2e", margin: "0 0 20px 28px" }} />
+
+                {/* 기능 3 */}
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: "#0ea5e915", border: "1px solid #0ea5e933", color: "#0ea5e9", fontSize: 10, fontWeight: 800 }}>3</span>
+                    롱숏 동시청산 시뮬레이션
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.7, paddingLeft: 28 }}>
+                    <div style={{ color: "#9ca3af", fontWeight: 600, marginBottom: 4 }}>언제 쓰나요?</div>
+                    같은 코인에 롱과 숏을 동시에 보유 중일 때, 둘 다 청산하면 최종 손익이 얼마인지 확인할 때
+                    <div style={{ color: "#9ca3af", fontWeight: 600, marginTop: 10, marginBottom: 4 }}>사용 방법</div>
+                    같은 코인에 롱·숏 포지션이 있으면 자동 표시됨<br />
+                    → 각 포지션의 청산 비율 설정 (25% / 50% / 75% / 100%)<br />
+                    → 현재가 기준 순손익, 본전가, 가격별 시나리오표 확인
+                  </div>
+                </div>
+
+                <div style={{ height: 1, background: "#1e1e2e", margin: "0 0 20px 28px" }} />
+
+                {/* 기능 4 */}
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: "#0ea5e915", border: "1px solid #0ea5e933", color: "#0ea5e9", fontSize: 10, fontWeight: 800 }}>4</span>
+                    동시청산 목표 익절가
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.7, paddingLeft: 28 }}>
+                    <div style={{ color: "#9ca3af", fontWeight: 600, marginBottom: 4 }}>언제 쓰나요?</div>
+                    "롱숏 동시에 닫아서 1,000 USDT 익절하고 싶은데, 가격이 얼마가 되어야 하지?" 할 때
+                    <div style={{ color: "#9ca3af", fontWeight: 600, marginTop: 10, marginBottom: 4 }}>사용 방법</div>
+                    동시청산 화면 내 목표 금액 입력 (예: 1000 USDT)<br />
+                    → 익절가 자동 계산 (현재가 대비 % 포함)
+                  </div>
+                </div>
+
+                <div style={{ height: 1, background: "#1e1e2e", margin: "0 0 20px 28px" }} />
+
+                {/* 기능 5 */}
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: "#0ea5e915", border: "1px solid #0ea5e933", color: "#0ea5e9", fontSize: 10, fontWeight: 800 }}>5</span>
+                    한쪽 포지션 부분청산 시뮬레이션
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.7, paddingLeft: 28 }}>
+                    <div style={{ color: "#9ca3af", fontWeight: 600, marginBottom: 4 }}>언제 쓰나요?</div>
+                    물린 포지션의 일부를 손절해서 마진을 확보하거나, 리스크를 줄이고 싶을 때
+                    <div style={{ color: "#9ca3af", fontWeight: 600, marginTop: 10, marginBottom: 4 }}>사용 방법</div>
+                    포지션 카드 → 물타기 → <span style={{ color: "#e2e8f0", fontWeight: 600 }}>부분 청산</span> 선택<br />
+                    → 손절 비율 설정 (25% / 50% / 75% / 100%)<br />
+                    → 실현 손익, Before/After 비교, 손절 후 사용 가능 금액 확인
+                  </div>
+                </div>
+
+                <div style={{ height: 1, background: "#1e1e2e", margin: "0 0 20px 28px" }} />
+
+                {/* 기능 6 */}
+                <div style={{ marginBottom: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: "#0ea5e915", border: "1px solid #0ea5e933", color: "#0ea5e9", fontSize: 10, fontWeight: 800 }}>6</span>
+                    반대 포지션 진입 시 청산가 변화
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.7, paddingLeft: 28 }}>
+                    <div style={{ color: "#9ca3af", fontWeight: 600, marginBottom: 4 }}>언제 쓰나요?</div>
+                    기존 포지션을 보유한 상태에서 반대 방향으로 포지션 진입했을 때, 강제 청산가가 어떻게 변하는지 미리 확인할 때
+                    <div style={{ color: "#9ca3af", fontWeight: 600, marginTop: 10, marginBottom: 4 }}>사용 방법</div>
+                    포지션 카드 → <span style={{ color: "#e2e8f0", fontWeight: 600 }}>헷지</span> 클릭<br />
+                    → 진입가, 투입금액, 레버리지 입력<br />
+                    → 강제 청산가 변화 (기존 → 헷지 후), 본전가, 동시청산 시 순손익 확인
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* TAB NAVIGATION */}
         <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
@@ -4287,6 +4471,10 @@ export default function SimV4() {
 
         <div style={S.footer}>
           교차 마진 · 수수료 왕복 · 펀딩비 미반영
+        </div>
+        <div style={{ textAlign: "center", padding: "0 20px 16px", fontSize: 8, color: "#2a2a3a", lineHeight: 1.6, fontFamily: "'DM Sans'" }}>
+          본 도구는 공개된 수학 공식을 기반으로 한 포지션 계산기이며, 투자 자문·매매 권유·수익 보장의 목적이 아닙니다.<br />
+          모든 거래 판단과 책임은 이용자 본인에게 있습니다.
         </div>
 
         </>)}
