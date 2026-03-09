@@ -3345,9 +3345,9 @@ export default function SimV4() {
               <SumCard label="총 미실현 PnL" value={`${fmtS(calc.totalPnL)} USDT`}
                 color={calc.totalPnL >= 0 ? T.accent : T.danger} />
               <SumCard label="유효 잔고 (Equity)" value={`${fmt(calc.equity)} USDT`}
-                color=T.textMid />
+                color={T.textMid} />
               <SumCard label="사용 마진" value={`${fmt(calc.totalMargin)} USDT`}
-                color=T.textSub />
+                color={T.textSub} />
               <SumCard label="사용 가능" value={`${fmt(calc.freeMargin)} USDT`}
                 color={calc.freeMargin > 0 ? T.accent : T.danger}
                 sub="미실현 이익 미반영 (Bybit)" />
@@ -4206,11 +4206,11 @@ export default function SimV4() {
                       <div style={{ flex: 1 }}>
                         <PriceInp value={entry.price} onChange={(v) => updPyra(entry.id, "price", v)} ph={`${counterDirKr} 진입가 ($)`}
                           cp={counterPos ? getCp(counterPos.coin) : 0}
-                          mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor=T.warning />
+                          mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor={T.warning} />
                       </div>
                       <div style={{ flex: 1 }}>
                         <Inp value={entry.margin} onChange={(v) => updPyra(entry.id, "margin", v)} ph="투입금액 (USDT)" />
-                        {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={(v) => updPyra(entry.id, "margin", v)} accentColor=T.warning />}
+                        {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={(v) => updPyra(entry.id, "margin", v)} accentColor={T.warning} />}
                       </div>
                       {pyraEntries.length > 1 && (
                         <button onClick={() => rmPyra(entry.id)} style={S.rmSm}>×</button>
@@ -4228,7 +4228,7 @@ export default function SimV4() {
                     <div style={{ ...S.splitPanel, borderColor: `${T.warning}22` }}>
                       <Fld label="총 투입금액 (USDT)">
                         <Inp value={pyraSplitTotal} onChange={setPyraSplitTotal} ph="300" />
-                        {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={setPyraSplitTotal} accentColor=T.warning />}
+                        {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={setPyraSplitTotal} accentColor={T.warning} />}
                       </Fld>
                       <div style={{ marginTop: 10 }}>
                         <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4, fontFamily: "'DM Sans'" }}>불타기 가격</div>
@@ -4238,7 +4238,7 @@ export default function SimV4() {
                             <div style={{ flex: 1 }}>
                               <PriceInp value={sp} onChange={(v) => updPyraSplitPrice(idx, v)} ph={`가격 ${idx + 1}`}
                                 cp={counterPos ? getCp(counterPos.coin) : 0}
-                                mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor=T.warning />
+                                mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor={T.warning} />
                             </div>
                             {pyraSplitPrices.length > 2 && (
                               <button onClick={() => rmPyraSplitPrice(idx)} style={{ ...S.rmSm, width: 28, height: 32, fontSize: 14 }}>×</button>
@@ -4246,7 +4246,7 @@ export default function SimV4() {
                           </div>
                         ))}
                         <button onClick={addPyraSplitPrice} style={{ ...S.addBtn, marginTop: 2, fontSize: 11, padding: "6px 0", borderColor: `${T.warning}33`, color: `${T.warning}66` }}>+ 가격 추가</button>
-                        <SplitAutoGen cp={counterPos ? getCp(counterPos.coin) : 0} isLong={counter.dir === "long"} onGenerate={setPyraSplitPrices} accentColor=T.warning />
+                        <SplitAutoGen cp={counterPos ? getCp(counterPos.coin) : 0} isLong={counter.dir === "long"} onGenerate={setPyraSplitPrices} accentColor={T.warning} />
                       </div>
 
                       {calc?.pyraSplitResult && (
@@ -4304,7 +4304,7 @@ export default function SimV4() {
                   <Fld label={`${counterDirKr} 불타기 진입 예정가 ($)`}>
                     <PriceInp value={pyraRevPrice} onChange={setPyraRevPrice} ph="불타기 진입가"
                       cp={counterPos ? getCp(counterPos.coin) : 0}
-                      mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor=T.warning />
+                      mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor={T.warning} />
                   </Fld>
                   <Fld label="목표 역전가 ($)">
                     <Inp value={pyraRevTarget} onChange={setPyraRevTarget} ph="이 가격에서 합산PnL=0" />
@@ -4401,7 +4401,7 @@ export default function SimV4() {
                   <HLCard label="기존 청산가"
                     value={pr.liqBefore ? `$${fmt(pr.liqBefore)}` : "—"}
                     delta={pr.liqDistBefore != null ? `${fmt(Math.abs(pr.liqDistBefore))}% 여유` : null}
-                    deltaColor=T.textMuted />
+                    deltaColor={T.textMuted} />
                 )}
               </div>
 
@@ -4425,8 +4425,8 @@ export default function SimV4() {
                           <tr key={i} style={i === pr.stages.length - 1 ? { background: "#0c0c18" } : {}}>
                             <TD c={i === pr.stages.length - 1 ? T.warning : T.textSub}>{st.label}</TD>
                             <TD>{fmt(st.margin, 0)}</TD>
-                            <TD c=T.textMid>{fmt(st.cumMargin, 0)}</TD>
-                            <TD c=T.warning>{st.reversalPrice ? `$${fmt(st.reversalPrice)}` : "—"}</TD>
+                            <TD c={T.textMid}>{fmt(st.cumMargin, 0)}</TD>
+                            <TD c={T.warning}>{st.reversalPrice ? `$${fmt(st.reversalPrice)}` : "—"}</TD>
                             {hasExLiq && (
                               <>
                                 <TD>{st.liqPrice ? `$${fmt(st.liqPrice)}` : "—"}</TD>
@@ -4538,7 +4538,7 @@ export default function SimV4() {
                               </TD>
                               <TD c={sc.lockedPnL >= 0 ? T.accent : T.danger}>{fmtS(sc.lockedPnL, 0)}</TD>
                               <TD c={sc.counterPnL >= 0 ? T.accent : T.danger}>{fmtS(sc.counterPnL, 0)}</TD>
-                              <TD c=T.textMuted>-{fmt(sc.fee, 0)}</TD>
+                              <TD c={T.textMuted}>-{fmt(sc.fee, 0)}</TD>
                               <TD c={sc.net >= 0 ? T.accent : T.danger} bold>
                                 {fmtS(sc.net, 0)}
                               </TD>
@@ -4772,7 +4772,7 @@ export default function SimV4() {
                     </thead>
                     <tbody>
                       <tr>
-                        <TD c=T.textMuted>Before</TD>
+                        <TD c={T.textMuted}>Before</TD>
                         <TD>{fmt(calc.wb)}</TD>
                         <TD>{fmt(calc.sel.mg)}</TD>
                         <TD>{fmt(calc.freeMargin)}</TD>
@@ -4787,9 +4787,9 @@ export default function SimV4() {
                         </TD>
                       </tr>
                       <tr style={{ background: "#0c0c18" }}>
-                        <TD c=T.textMid bold>After</TD>
-                        <TD c=T.textMid>{fmt(cr.newWallet)}</TD>
-                        <TD c=T.textMid>{fmt(cr.remaining.margin)}</TD>
+                        <TD c={T.textMid} bold>After</TD>
+                        <TD c={T.textMid}>{fmt(cr.newWallet)}</TD>
+                        <TD c={T.textMid}>{fmt(cr.remaining.margin)}</TD>
                         <TD c={cr.remFreeMargin > 0 ? T.accent : T.danger} bold>
                           {fmt(cr.remFreeMargin)}
                         </TD>
@@ -4798,7 +4798,7 @@ export default function SimV4() {
                             <TD c={cr.remLiq != null ? T.accent : T.textMuted}>
                               {cr.remLiq != null ? `$${fmt(cr.remLiq)}` : "—"}
                             </TD>
-                            <TD c=T.accent>
+                            <TD c={T.accent}>
                               {cr.remLiqDist != null ? `${fmt(Math.abs(cr.remLiqDist))}%` : "—"}
                             </TD>
                           </>
@@ -4839,7 +4839,7 @@ export default function SimV4() {
                       deltaColor={(isLong && cr.closeAndDCA.newAvg < calc.sel.ep) || (!isLong && cr.closeAndDCA.newAvg > calc.sel.ep) ? T.accent : T.danger} />
                     <HLCard label="탈출가" value={`$${fmt(cr.closeAndDCA.breakeven)}`}
                       delta={cr.closeAndDCA.liq != null ? `청산가 $${fmt(cr.closeAndDCA.liq)}` : ""}
-                      deltaColor=T.warning />
+                      deltaColor={T.warning} />
                   </div>
                   <div style={{ fontSize: 10, color: T.textDim, marginTop: 4 }}>
                     * 시뮬레이션 모드의 첫 번째 물타기 진입가 기준
@@ -5257,10 +5257,10 @@ export default function SimV4() {
                     <tbody>
                       {hcCalc.onewayScenario.map((s) => (
                         <tr key={s.cycle}>
-                          <TD c=T.textMid>#{s.cycle}</TD>
+                          <TD c={T.textMid}>#{s.cycle}</TD>
                           <TD c={s.loserMg < 10 ? T.danger : T.textSub}>{fmt(s.loserMg)} USDT</TD>
-                          <TD c=T.accent>+{fmt(s.cumProfit)}</TD>
-                          <TD c=T.textSub>{fmt(s.cumVolume, 0)}</TD>
+                          <TD c={T.accent}>+{fmt(s.cumProfit)}</TD>
+                          <TD c={T.textSub}>{fmt(s.cumVolume, 0)}</TD>
                         </tr>
                       ))}
                     </tbody>
@@ -5365,12 +5365,12 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
             sub={a.liqDist != null ? `현재가 대비 ${fmt(Math.abs(a.liqDist))}% 여유` : null} />
         ) : (
           <HLCard label="새 청산가" value="—"
-            delta="거래소 청산가 입력 필요" deltaColor=T.textMuted />
+            delta="거래소 청산가 입력 필요" deltaColor={T.textMuted} />
         )}
 
         <HLCard label="탈출가 (수수료 포함)" value={`$${fmt(r.breakeven)}`}
           delta={`평단 대비 ${isLong ? "+" : ""}${fmt(Math.abs(r.moveNeeded), 3)}%`}
-          deltaColor=T.warning wide />
+          deltaColor={T.warning} wide />
       </div>
 
       {/* Before / After table */}
@@ -5387,7 +5387,7 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
             </thead>
             <tbody>
               <tr>
-                <TD c=T.textMuted>Before</TD>
+                <TD c={T.textMuted}>Before</TD>
                 <TD>${fmt(b.avg)}</TD>
                 <TD>{fmt(b.margin)}</TD>
                 {hasExLiq && (
@@ -5401,9 +5401,9 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
                 </TD>
               </tr>
               <tr style={{ background: "#0c0c18" }}>
-                <TD c=T.textMid bold>After</TD>
-                <TD c=T.accentBlue>${fmt(a.avg)}</TD>
-                <TD c=T.textMid>{fmt(a.margin)}</TD>
+                <TD c={T.textMid} bold>After</TD>
+                <TD c={T.accentBlue}>${fmt(a.avg)}</TD>
+                <TD c={T.textMid}>{fmt(a.margin)}</TD>
                 {hasExLiq && (
                   <>
                     <TD c={liqWorse ? T.danger : T.accent}>
@@ -5510,12 +5510,12 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
                 })}
                 {customExit && (
                   <tr style={{ background: "#0a1020" }}>
-                    <TD c=T.accentBlue>커스텀</TD>
-                    <TD c=T.accentBlue>${fmt(customExit.exitPrice)}</TD>
+                    <TD c={T.accentBlue}>커스텀</TD>
+                    <TD c={T.accentBlue}>${fmt(customExit.exitPrice)}</TD>
                     <TD c={customExit.changePct >= 0 ? T.accent : T.danger}>
                       {fmtS(customExit.changePct)}%
                     </TD>
-                    <TD c=T.accentBlue>
+                    <TD c={T.accentBlue}>
                       {fmtS(customExit.pnl)} USDT
                     </TD>
                   </tr>
@@ -5971,7 +5971,7 @@ function HedgePanel({ pos, calc, hedgeEntry, setHedgeEntry, hedgeMargin, setHedg
                         </TD>
                         <TD c={s.origPnL >= 0 ? T.accent : T.danger}>{fmtS(s.origPnL)}</TD>
                         <TD c={s.hedgePnL >= 0 ? T.accent : T.danger}>{fmtS(s.hedgePnL)}</TD>
-                        <TD c=T.warning>-{fmt(s.closeFee + hr.entryFees)}</TD>
+                        <TD c={T.warning}>-{fmt(s.closeFee + hr.entryFees)}</TD>
                         <TD c={s.net >= 0 ? T.accent : T.danger} bold>{fmtS(s.net)}</TD>
                       </tr>
                     ))}
