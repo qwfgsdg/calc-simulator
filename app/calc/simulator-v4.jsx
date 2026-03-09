@@ -124,9 +124,59 @@ const storageAdapter = {
 };
 
 /* ═══════════════════════════════════════════
+   THEME SYSTEM
+   ═══════════════════════════════════════════ */
+const STORAGE_KEY_THEME = "simv4-theme";
+const THEMES = {
+  dark: {
+    bg: "#050508", bgCard: "#08080f", bgInput: "#0a0a12", bgInput2: "#0a0a14",
+    bgSplit: "#06060e", bgOverlay: "#000000cc", bgOverlay2: "#000000aa",
+    bgDropdown: "#0c0c16", bgHover: "#ffffff06",
+    border: "#1e1e2e", borderHeader: "#111118", borderSub: "#0e0e18",
+    text: "#cbd5e1", textBright: "#f8fafc", textBright2: "#f1f5f9",
+    textMid: "#e2e8f0", textDim: "#4b5563", textMuted: "#6b7280",
+    textSub: "#94a3b8", textDark: "#2a2a3a", textEmpty: "#333",
+    accent: "#34d399", accentBlue: "#0ea5e9", danger: "#f87171",
+    warning: "#f59e0b", pink: "#ec4899",
+    scrollThumb: "#2a2a3a",
+  },
+  light: {
+    bg: "#f5f5f7", bgCard: "#ffffff", bgInput: "#f0f0f3", bgInput2: "#eef0f4",
+    bgSplit: "#f7f8fa", bgOverlay: "#00000066", bgOverlay2: "#00000055",
+    bgDropdown: "#ffffff", bgHover: "#00000008",
+    border: "#d1d5db", borderHeader: "#e5e7eb", borderSub: "#f0f0f3",
+    text: "#374151", textBright: "#111827", textBright2: "#1f2937",
+    textMid: "#1f2937", textDim: "#6b7280", textMuted: "#9ca3af",
+    textSub: "#6b7280", textDark: "#d1d5db", textEmpty: "#aaa",
+    accent: "#059669", accentBlue: "#0284c7", danger: "#dc2626",
+    warning: "#d97706", pink: "#db2777",
+    scrollThumb: "#d1d5db",
+  },
+};
+
+/* ═══════════════════════════════════════════
    MAIN COMPONENT
    ═══════════════════════════════════════════ */
 export default function SimV4() {
+  // ── Theme ──
+  const [theme, setTheme] = useState(() => {
+    try { const s = localStorage.getItem(STORAGE_KEY_THEME); return s === "light" ? "light" : "dark"; }
+    catch { return "dark"; }
+  });
+  const T = THEMES[theme];
+  const toggleTheme = useCallback(() => {
+    setTheme(prev => {
+      const next = prev === "dark" ? "light" : "dark";
+      try { localStorage.setItem(STORAGE_KEY_THEME, next); } catch {}
+      return next;
+    });
+  }, []);
+
+  // ── Coupon Recovery ──
+  const [couponModalOpen, setCouponModalOpen] = useState(false);
+  const [couponRecoveryPrice, setCouponRecoveryPrice] = useState("");
+  const [couponAmount, setCouponAmount] = useState("");
+
   const [wallet, setWallet] = useState("");
   const [coinPrices, setCoinPrices] = useState({}); // { ETH: "2647.35", BTC: "97340" }
   const [feeRate, setFeeRate] = useState("0.04");
@@ -219,7 +269,173 @@ export default function SimV4() {
   const [profileModalColor, setProfileModalColor] = useState("emerald");
   const profileDropdownRef = useRef(null);
   const activeProfile = profiles.find(p => p.id === activeProfileId);
-  const activeColor = PROFILE_COLORS.find(c => c.id === (activeProfile?.colorId || "emerald"))?.hex || "#34d399";
+  const activeColor = PROFILE_COLORS.find(c => c.id === (activeProfile?.colorId || "emerald"))?.hex || T.accent;
+
+  // ── Theme-aware styles ──
+  const S = useMemo(() => ({
+    root: {
+      minHeight: "100vh", background: T.bg, color: T.text,
+      fontFamily: "'IBM Plex Mono', monospace", padding: "20px 12px",
+      transition: "background-color 0.3s ease, color 0.3s ease",
+    },
+    wrap: { maxWidth: 760, margin: "0 auto" },
+    hdr: { marginBottom: 28, paddingBottom: 20, borderBottom: `1px solid ${T.borderHeader}` },
+    hdrRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 },
+    hdrDot: { width: 6, height: 6, borderRadius: "50%", background: T.accent, boxShadow: `0 0 8px ${T.accent}44` },
+    hdrBadge: { fontSize: 10, fontWeight: 700, letterSpacing: 2.5, color: T.accent, fontFamily: "'DM Sans'" },
+    hdrTitle: { fontSize: 28, fontWeight: 800, color: T.textBright, fontFamily: "'DM Sans'", letterSpacing: -0.5 },
+    hdrSub: { fontSize: 12, color: T.textDim, marginTop: 4, fontFamily: "'DM Sans'" },
+
+    grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 },
+    grid3: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 },
+
+    inp: {
+      width: "100%", padding: "10px 12px", background: T.bgInput, border: `1px solid ${T.border}`,
+      borderRadius: 8, color: T.textMid, fontSize: 14, fontFamily: "'IBM Plex Mono'",
+      outline: "none", transition: "border-color 0.15s, background-color 0.3s",
+    },
+    sel: {
+      width: "100%", padding: "10px 12px", background: T.bgInput, border: `1px solid ${T.border}`,
+      borderRadius: 8, color: T.textMid, fontSize: 13, fontFamily: "'IBM Plex Mono'",
+      outline: "none", appearance: "none", WebkitAppearance: "none",
+    },
+
+    card: {
+      padding: 16, borderRadius: 12, border: `1px solid ${T.border}`, background: T.bgCard,
+      marginBottom: 10, transition: "border-color 0.2s, background-color 0.3s",
+    },
+    miniBtn: {
+      padding: "4px 10px", fontSize: 11, fontWeight: 500, border: `1px solid ${T.border}`,
+      borderRadius: 6, background: "transparent", cursor: "pointer", fontFamily: "'DM Sans'",
+    },
+    autoRow: {
+      marginTop: 10, padding: "8px 10px", background: T.bgInput2, borderRadius: 6,
+      fontSize: 11, color: T.textDim, display: "flex", gap: 16, flexWrap: "wrap",
+    },
+    addBtn: {
+      width: "100%", padding: "10px 0", border: `1px dashed ${T.border}`, borderRadius: 8,
+      background: "transparent", color: T.textDim, cursor: "pointer", fontSize: 12,
+      fontFamily: "'DM Sans'", marginTop: 6,
+    },
+
+    summaryGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 },
+    sumCard: { padding: 12, borderRadius: 10, background: T.bgCard, border: `1px solid ${T.border}` },
+
+    availBox: {
+      marginTop: 8, padding: 14, borderRadius: 10,
+      background: T.bgCard, border: `1px solid ${T.border}`,
+    },
+    availRow: { display: "flex", gap: 8, alignItems: "stretch" },
+
+    shortfallBox: {
+      marginTop: 8, padding: 10, borderRadius: 6,
+      background: `${T.accentBlue}08`, border: `1px solid ${T.accentBlue}22`,
+      fontSize: 12, color: T.text, lineHeight: 1.6,
+    },
+
+    liqBar: {
+      marginTop: 10, padding: 16, borderRadius: 10,
+      background: T.bgCard, border: `1px solid ${T.border}`,
+    },
+    liqBarInner: { display: "flex", justifyContent: "space-between", alignItems: "flex-end" },
+    liqVisual: { marginTop: 12 },
+    liqTrack: { height: 6, background: T.border, borderRadius: 3, overflow: "hidden" },
+    liqFill: { height: "100%", borderRadius: 3, transition: "width 0.3s" },
+    liqEmpty: {
+      marginTop: 10, padding: 14, borderRadius: 8, background: T.bgCard,
+      border: `1px dashed ${T.border}`, textAlign: "center", fontSize: 12, color: T.textDim,
+    },
+
+    modeRow: { display: "flex", gap: 6, marginBottom: 12 },
+    modeBtn: {
+      flex: 1, padding: "10px 0", fontSize: 12, fontWeight: 600, borderRadius: 8,
+      border: `1px solid ${T.border}`, cursor: "pointer", fontFamily: "'DM Sans'",
+      background: "transparent", transition: "all 0.15s",
+    },
+    splitToggle: {
+      width: "100%", padding: "8px 0", marginTop: 6, border: `1px dashed ${T.border}`,
+      borderRadius: 8, background: "transparent", color: T.textDim, cursor: "pointer",
+      fontSize: 11, fontFamily: "'DM Sans'", transition: "all 0.15s",
+    },
+    splitPanel: {
+      marginTop: 8, padding: 14, borderRadius: 10,
+      background: T.bgSplit, border: `1px solid ${T.border}`,
+    },
+    splitGrid: {
+      display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8,
+    },
+    splitCard: {
+      padding: 12, borderRadius: 8, border: `1px solid ${T.border}`, background: T.bgInput2,
+    },
+    applyBtn: {
+      padding: "4px 10px", fontSize: 10, fontWeight: 600, borderRadius: 4,
+      border: `1px solid ${T.accentBlue}33`, background: `${T.accentBlue}10`, color: T.accentBlue,
+      cursor: "pointer", fontFamily: "'DM Sans'", whiteSpace: "nowrap",
+    },
+    dcaRow: { display: "flex", gap: 8, alignItems: "center", marginBottom: 8 },
+    dcaNum: {
+      width: 24, height: 24, borderRadius: "50%", background: `${T.accentBlue}15`, border: `1px solid ${T.accentBlue}33`,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: 11, color: T.accentBlue, fontWeight: 600, flexShrink: 0,
+    },
+    rmSm: {
+      width: 32, height: 40, border: `1px solid ${T.border}`, background: "transparent",
+      color: T.danger, borderRadius: 6, cursor: "pointer", fontSize: 16,
+      display: "flex", alignItems: "center", justifyContent: "center",
+    },
+    empty: { textAlign: "center", padding: "36px 16px", color: T.textEmpty, fontSize: 13, fontFamily: "'DM Sans'" },
+    divider: { height: 1, margin: "28px 0", background: `linear-gradient(90deg, transparent, ${T.accentBlue}22, transparent)` },
+
+    hlGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 },
+    hlCard: { padding: 16, borderRadius: 10, background: T.bgInput2, border: `1px solid ${T.border}` },
+
+    revHL: {
+      padding: 20, borderRadius: 12, background: T.bgInput2, border: `1px solid ${T.accentBlue}44`,
+      marginBottom: 12, textAlign: "center", fontFamily: "'DM Sans'",
+    },
+
+    tblWrap: { overflowX: "auto", borderRadius: 10, border: `1px solid ${T.border}`, marginBottom: 12 },
+    tbl: { width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: "'IBM Plex Mono'" },
+    th: {
+      padding: "10px 10px", textAlign: "left", color: T.textDim, fontWeight: 500, fontSize: 10,
+      letterSpacing: 0.5, borderBottom: `1px solid ${T.border}`, background: T.bgCard,
+      whiteSpace: "nowrap", fontFamily: "'DM Sans'",
+    },
+    td: { padding: "10px 10px", borderBottom: `1px solid ${T.borderHeader}`, whiteSpace: "nowrap" },
+
+    detBox: { padding: 16, borderRadius: 10, background: T.bgCard, border: `1px solid ${T.border}`, marginBottom: 12 },
+    detTitle: { fontSize: 10, color: T.textDim, letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" },
+    sl: { display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.borderSub}`, fontSize: 12 },
+
+    warnBox: {
+      padding: 14, borderRadius: 8, background: `${T.danger}08`, border: `1px solid ${T.danger}22`,
+      fontSize: 12, color: T.danger, lineHeight: 1.6, marginBottom: 12,
+    },
+
+    exitBox: {
+      padding: 16, borderRadius: 10, background: T.bgCard, border: `1px solid ${T.border}`,
+      marginBottom: 12,
+    },
+    exitTitle: {
+      fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase",
+      color: T.warning, fontFamily: "'DM Sans'", marginBottom: 4,
+    },
+    exitCustomRow: {
+      display: "flex", alignItems: "center", gap: 8, marginTop: 10,
+    },
+
+    cdBox: {
+      padding: 16, borderRadius: 10,
+      background: T.bgInput2, border: `1px solid ${T.accentBlue}22`,
+      marginBottom: 12,
+    },
+    cdTitle: {
+      fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase",
+      color: T.accentBlue, fontFamily: "'DM Sans'", marginBottom: 4,
+    },
+
+    footer: { marginTop: 28, textAlign: "center", fontSize: 11, color: T.textEmpty, fontFamily: "'DM Sans'" },
+  }), [T]);
 
   // ── 프로필 데이터를 state에 적용하는 헬퍼 ──
   const applyProfileData = (data) => {
@@ -687,14 +903,15 @@ export default function SimV4() {
     //   wb + P × Σ(sign_i × qty_i) - Σ(sign_i × ep_i × qty_i) = mmRate × P × Σ(qty_i)
     //   wb - Σ(sign_i × ep_i × qty_i) = P × [mmRate × Σ(qty_i) - Σ(sign_i × qty_i)]
     //   P = [wb - Σ(sign_i × ep_i × qty_i)] / [mmRate × Σ(qty_i) - Σ(sign_i × qty_i)]
-    const solveLiq = (posArr, mmr) => {
+    const solveLiq = (posArr, mmr, wbOverride) => {
       if (!mmr || mmr <= 0) return null;
+      const w = wbOverride != null ? wbOverride : wb;
       const sumSignQty = posArr.reduce((a, p) => a + p.sign * p.qty, 0);
       const sumSignEpQty = posArr.reduce((a, p) => a + p.sign * p.ep * p.qty, 0);
       const sumQty = posArr.reduce((a, p) => a + p.qty, 0);
       const denom = mmr * sumQty - sumSignQty;
       if (Math.abs(denom) < 1e-12) return null;
-      const liq = (wb - sumSignEpQty) / denom;
+      const liq = (w - sumSignEpQty) / denom;
       return liq > 0 ? liq : 0;
     };
 
@@ -2112,7 +2329,7 @@ export default function SimV4() {
     });
 
     return {
-      parsed, wb, cp, fee, exLiq, calcRefCoin, autoLiqPrices, solveLiqForCoin,
+      parsed, wb, cp, fee, exLiq, calcRefCoin, autoLiqPrices, solveLiqForCoin, solveLiq,
       totalPnL, equity, totalMargin, freeMargin,
       mmActual, mmRate, liqDistPct,
       sel, dcaResult, revResult, closeResult, splitResult, availCalc,
@@ -2123,6 +2340,44 @@ export default function SimV4() {
   }, [wallet, coinPrices, feeRate, coinLiqPrices, positions, selId, dcaMode, dcaEntries, revPrice, revTarget, targetAvail, closeRatio, closePrice, splitMode, splitTotal, splitPrices, pyraMode, pyraLockedId, pyraCounterId, pyraSubMode, pyraEntries, pyraRevPrice, pyraRevTarget, pyraSplitMode, pyraSplitTotal, pyraSplitPrices, scCloseRatios, scTargets, hedgeId, hedgeEntry, hedgeMargin, hedgeLev]);
 
   const selPos = positions.find((p) => p.id === selId);
+
+  // ── Coupon Recovery Calculation ──
+  const couponCalc = useMemo(() => {
+    const recPrice = n(couponRecoveryPrice);
+    const cpnAmt = n(couponAmount);
+    if (!recPrice || !cpnAmt || !calc) return null;
+    const { parsed, wb, cp, exLiq, mmRate, fee, solveLiq } = calc;
+    if (!parsed || parsed.length === 0 || !cp || cp <= 0) return null;
+
+    // 1. Distance from current price to recovery price
+    const distance = ((cp - recPrice) / cp) * 100;
+
+    // 2. Expected loss at recovery price (PnL + close fees)
+    const totalPnL = parsed.reduce((sum, pos) => {
+      return sum + pos.sign * (recPrice - pos.ep) * pos.qty;
+    }, 0);
+    const totalCloseFee = parsed.reduce((sum, pos) => {
+      return sum + pos.qty * recPrice * fee;
+    }, 0);
+    const expectedLoss = totalPnL - totalCloseFee;
+
+    // 3. New liquidation price after coupon removal (wb - couponAmount)
+    const newWb = wb - cpnAmt;
+    const newLiq = mmRate && solveLiq ? solveLiq(parsed, mmRate, newWb) : null;
+
+    // 4. Warning: is recovery price closer than liquidation price?
+    let recoveryCloser = false;
+    if (exLiq && recPrice) {
+      const isLong = parsed[0]?.sign === 1;
+      if (isLong) {
+        recoveryCloser = recPrice > exLiq; // Long: recovery above liq = closer
+      } else {
+        recoveryCloser = recPrice < exLiq; // Short: recovery below liq = closer
+      }
+    }
+
+    return { distance, expectedLoss, newLiq, currentLiq: exLiq, recoveryCloser, refPrice: cp };
+  }, [couponRecoveryPrice, couponAmount, calc]);
 
   /* ═══════════════════════════════════════════
      HEDGE CYCLE CALC
@@ -2294,13 +2549,13 @@ export default function SimV4() {
     // 알림 가격 배열
     const alertPrices = [];
     if (longTriggerPrice && longTriggerPrice > 0) {
-      alertPrices.push({ label: "롱 익절 트리거", price: longTriggerPrice, color: "#34d399" });
+      alertPrices.push({ label: "롱 익절 트리거", price: longTriggerPrice, color: T.accent });
     }
     if (shortTriggerPrice && shortTriggerPrice > 0) {
-      alertPrices.push({ label: "숏 익절 트리거", price: shortTriggerPrice, color: "#f87171" });
+      alertPrices.push({ label: "숏 익절 트리거", price: shortTriggerPrice, color: T.danger });
     }
     if (recoveryPrice && recoveryPrice > 0) {
-      alertPrices.push({ label: `${loser === "long" ? "롱" : "숏"} 복구 (본전)`, price: recoveryPrice, color: "#0ea5e9" });
+      alertPrices.push({ label: `${loser === "long" ? "롱" : "숏"} 복구 (본전)`, price: recoveryPrice, color: T.accentBlue });
     }
 
     // 킬 스위치 근접 가격 역산
@@ -2317,7 +2572,7 @@ export default function SimV4() {
       }
     }
     if (killPrice && killPrice > 0) {
-      alertPrices.push({ label: "⚠ 킬 스위치", price: killPrice, color: "#f87171" });
+      alertPrices.push({ label: "⚠ 킬 스위치", price: killPrice, color: T.danger });
     }
 
     // 원웨이 시나리오 (연속 +40% 시 loser 축소 경로)
@@ -2365,7 +2620,7 @@ export default function SimV4() {
         *{box-sizing:border-box;margin:0;padding:0}
         input[type=number]{-moz-appearance:textfield;appearance:textfield}
         input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{-webkit-appearance:none}
-        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#2a2a3a;border-radius:2px}
+        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:${T.scrollThumb};border-radius:2px}
         select{cursor:pointer}
       `}</style>
 
@@ -2381,26 +2636,40 @@ export default function SimV4() {
             <p style={S.hdrSub}></p>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {saveStatus === "saved" && (
-                <span style={{ fontSize: 9, color: "#34d399", fontFamily: "'DM Sans'" }}>
+                <span style={{ fontSize: 9, color: T.accent, fontFamily: "'DM Sans'" }}>
                   💾 저장됨
                 </span>
               )}
               {saveStatus === "saving" && (
-                <span style={{ fontSize: 9, color: "#4b5563", fontFamily: "'DM Sans'" }}>
+                <span style={{ fontSize: 9, color: T.textDim, fontFamily: "'DM Sans'" }}>
                   저장 중...
                 </span>
               )}
+              <button onClick={toggleTheme} style={{
+                fontSize: 9, padding: "3px 8px", borderRadius: 4,
+                border: `1px solid ${T.border}`, background: "transparent",
+                color: T.textDim, cursor: "pointer", fontFamily: "'DM Sans'",
+              }} title={theme === "dark" ? "라이트 모드" : "다크 모드"}>
+                {theme === "dark" ? "☀" : "☾"}
+              </button>
+              <button onClick={() => setCouponModalOpen(true)} style={{
+                fontSize: 9, padding: "3px 8px", borderRadius: 4,
+                border: `1px solid ${T.border}`, background: "transparent",
+                color: T.textDim, cursor: "pointer", fontFamily: "'DM Sans'",
+              }} title="펀딩 쿠폰 계산기">
+                COUPON
+              </button>
               <button onClick={() => setGuideOpen(true)} style={{
                 fontSize: 9, padding: "3px 8px", borderRadius: 4,
-                border: "1px solid #1e1e2e", background: "transparent",
-                color: "#4b5563", cursor: "pointer", fontFamily: "'DM Sans'",
+                border: `1px solid ${T.border}`, background: "transparent",
+                color: T.textDim, cursor: "pointer", fontFamily: "'DM Sans'",
               }} title="사용 가이드">
                 ?
               </button>
               <button onClick={handleReset} style={{
                 fontSize: 9, padding: "3px 8px", borderRadius: 4,
-                border: "1px solid #1e1e2e", background: "transparent",
-                color: "#4b5563", cursor: "pointer", fontFamily: "'DM Sans'",
+                border: `1px solid ${T.border}`, background: "transparent",
+                color: T.textDim, cursor: "pointer", fontFamily: "'DM Sans'",
               }} title="현재 프로필 데이터 초기화">
                 초기화
               </button>
@@ -2412,7 +2681,7 @@ export default function SimV4() {
         <div ref={profileDropdownRef} style={{
           position: "relative", marginBottom: 16,
           padding: "10px 14px", borderRadius: 10,
-          background: "#08080f", border: `1px solid ${activeColor}33`,
+          background: T.bgCard, border: `1px solid ${activeColor}33`,
           fontFamily: "'DM Sans'",
         }}>
           {/* 상단: 셀렉터 + 액션 버튼 */}
@@ -2424,7 +2693,7 @@ export default function SimV4() {
                 flex: 1, display: "flex", alignItems: "center", gap: 8,
                 padding: "8px 12px", borderRadius: 8,
                 background: profileDropdownOpen ? "#0a0a18" : "transparent",
-                border: `1px solid ${profileDropdownOpen ? activeColor + "44" : "#1e1e2e"}`,
+                border: `1px solid ${profileDropdownOpen ? activeColor + "44" : T.border}`,
                 cursor: "pointer", transition: "all 0.15s",
               }}
             >
@@ -2433,10 +2702,10 @@ export default function SimV4() {
                 background: activeColor, boxShadow: `0 0 6px ${activeColor}66`,
                 flexShrink: 0,
               }} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", textAlign: "left", flex: 1 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: T.textMid, textAlign: "left", flex: 1 }}>
                 {activeProfile?.name || "프로필 선택"}
               </span>
-              <span style={{ fontSize: 10, color: "#4b5563", transform: profileDropdownOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▼</span>
+              <span style={{ fontSize: 10, color: T.textDim, transform: profileDropdownOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▼</span>
             </button>
             {/* 새 프로필 */}
             <button
@@ -2448,8 +2717,8 @@ export default function SimV4() {
               }}
               style={{
                 padding: "8px 12px", fontSize: 11, fontWeight: 600, borderRadius: 8,
-                border: "1px solid #1e1e2e", background: "transparent",
-                color: "#0ea5e9", cursor: "pointer", whiteSpace: "nowrap",
+                border: `1px solid ${T.border}`, background: "transparent",
+                color: T.accentBlue, cursor: "pointer", whiteSpace: "nowrap",
               }}
             >＋ 새 프로필</button>
           </div>
@@ -2459,12 +2728,12 @@ export default function SimV4() {
             <div style={{
               position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100,
               marginTop: 4, padding: 6, borderRadius: 10,
-              background: "#0c0c16", border: "1px solid #1e1e2e",
+              background: T.bgDropdown, border: `1px solid ${T.border}`,
               boxShadow: "0 12px 40px #00000088",
               maxHeight: 320, overflowY: "auto",
             }}>
               {[...profiles].sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0)).map((p) => {
-                const pColor = PROFILE_COLORS.find(c => c.id === p.colorId)?.hex || "#34d399";
+                const pColor = PROFILE_COLORS.find(c => c.id === p.colorId)?.hex || T.accent;
                 const isActive = p.id === activeProfileId;
                 return (
                   <div key={p.id} style={{
@@ -2475,7 +2744,7 @@ export default function SimV4() {
                     marginBottom: 2, transition: "all 0.15s",
                   }}
                     onClick={() => !isActive && switchProfile(p.id)}
-                    onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "#ffffff06"; }}
+                    onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = T.bgHover; }}
                     onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
                   >
                     <div style={{
@@ -2483,7 +2752,7 @@ export default function SimV4() {
                       background: pColor, boxShadow: `0 0 6px ${pColor}44`,
                       flexShrink: 0,
                     }} />
-                    <span style={{ flex: 1, fontSize: 12, fontWeight: isActive ? 600 : 400, color: isActive ? "#f1f5f9" : "#94a3b8" }}>
+                    <span style={{ flex: 1, fontSize: 12, fontWeight: isActive ? 600 : 400, color: isActive ? T.textBright2 : T.textSub }}>
                       {p.name}
                     </span>
                     {isActive && <span style={{ fontSize: 9, color: pColor, fontWeight: 600 }}>활성</span>}
@@ -2495,8 +2764,8 @@ export default function SimV4() {
                       setProfileModal("rename-" + p.id);
                       setProfileDropdownOpen(false);
                     }} style={{
-                      padding: "2px 6px", fontSize: 10, border: "1px solid #1e1e2e",
-                      borderRadius: 4, background: "transparent", color: "#6b7280",
+                      padding: "2px 6px", fontSize: 10, border: `1px solid ${T.border}`,
+                      borderRadius: 4, background: "transparent", color: T.textMuted,
                       cursor: "pointer",
                     }}>✏️</button>
                     {profiles.length > 1 && (
@@ -2505,8 +2774,8 @@ export default function SimV4() {
                         setProfileDropdownOpen(false);
                         deleteProfile(p.id);
                       }} style={{
-                        padding: "2px 6px", fontSize: 10, border: "1px solid #1e1e2e",
-                        borderRadius: 4, background: "transparent", color: "#f87171",
+                        padding: "2px 6px", fontSize: 10, border: `1px solid ${T.border}`,
+                        borderRadius: 4, background: "transparent", color: T.danger,
                         cursor: "pointer",
                       }}>🗑</button>
                     )}
@@ -2520,22 +2789,22 @@ export default function SimV4() {
           {profileModal && (
             <div style={{
               position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-              background: "#000000aa", zIndex: 200,
+              background: T.bgOverlay2, zIndex: 200,
               display: "flex", alignItems: "center", justifyContent: "center",
               padding: 20,
             }} onClick={() => setProfileModal(null)}>
               <div style={{
                 width: "100%", maxWidth: 360, padding: 24, borderRadius: 14,
-                background: "#0c0c16", border: "1px solid #1e1e2e",
+                background: T.bgDropdown, border: `1px solid ${T.border}`,
                 boxShadow: "0 20px 60px #000000cc",
                 fontFamily: "'DM Sans'",
               }} onClick={(e) => e.stopPropagation()}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: "#f1f5f9", marginBottom: 16 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: T.textBright2, marginBottom: 16 }}>
                   {profileModal === "create" ? "새 프로필 만들기" : "프로필 편집"}
                 </div>
                 {/* 이름 입력 */}
                 <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>프로필 이름</div>
+                  <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 6 }}>프로필 이름</div>
                   <input
                     type="text" value={profileModalName}
                     onChange={(e) => setProfileModalName(e.target.value)}
@@ -2560,13 +2829,13 @@ export default function SimV4() {
                 </div>
                 {/* 색상 선택 */}
                 <div style={{ marginBottom: 18 }}>
-                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>색상 태그</div>
+                  <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 8 }}>색상 태그</div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {PROFILE_COLORS.map((c) => (
                       <button key={c.id} onClick={() => setProfileModalColor(c.id)} style={{
                         width: 32, height: 32, borderRadius: 8,
                         background: profileModalColor === c.id ? `${c.hex}22` : "transparent",
-                        border: `2px solid ${profileModalColor === c.id ? c.hex : "#1e1e2e"}`,
+                        border: `2px solid ${profileModalColor === c.id ? c.hex : T.border}`,
                         cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
                         transition: "all 0.15s",
                       }}>
@@ -2583,8 +2852,8 @@ export default function SimV4() {
                 <div style={{ display: "flex", gap: 8 }}>
                   <button onClick={() => setProfileModal(null)} style={{
                     flex: 1, padding: "10px 0", fontSize: 12, fontWeight: 600,
-                    borderRadius: 8, border: "1px solid #1e1e2e", background: "transparent",
-                    color: "#6b7280", cursor: "pointer",
+                    borderRadius: 8, border: `1px solid ${T.border}`, background: "transparent",
+                    color: T.textMuted, cursor: "pointer",
                   }}>취소</button>
                   <button onClick={() => {
                     const name = profileModalName.trim();
@@ -2597,9 +2866,9 @@ export default function SimV4() {
                     setProfileModal(null);
                   }} style={{
                     flex: 1, padding: "10px 0", fontSize: 12, fontWeight: 600,
-                    borderRadius: 8, border: `1px solid ${PROFILE_COLORS.find(c => c.id === profileModalColor)?.hex || "#34d399"}44`,
-                    background: `${PROFILE_COLORS.find(c => c.id === profileModalColor)?.hex || "#34d399"}15`,
-                    color: PROFILE_COLORS.find(c => c.id === profileModalColor)?.hex || "#34d399",
+                    borderRadius: 8, border: `1px solid ${PROFILE_COLORS.find(c => c.id === profileModalColor)?.hex || T.accent}44`,
+                    background: `${PROFILE_COLORS.find(c => c.id === profileModalColor)?.hex || T.accent}15`,
+                    color: PROFILE_COLORS.find(c => c.id === profileModalColor)?.hex || T.accent,
                     cursor: "pointer",
                   }}>{profileModal === "create" ? "생성" : "저장"}</button>
                 </div>
@@ -2608,36 +2877,129 @@ export default function SimV4() {
           )}
         </div>
 
+        {/* ══════ COUPON MODAL ══════ */}
+        {couponModalOpen && (
+          <div style={{
+            position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+            background: T.bgOverlay, zIndex: 300,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 20,
+          }} onClick={() => setCouponModalOpen(false)}>
+            <div style={{
+              background: T.bgDropdown, border: `1px solid ${T.border}`,
+              borderRadius: 16, padding: 24, width: 340, maxWidth: "90vw",
+            }} onClick={e => e.stopPropagation()}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: T.textBright, marginBottom: 16, fontFamily: "'DM Sans'" }}>
+                펀딩 쿠폰 계산기
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, color: T.textDim, marginBottom: 6, fontFamily: "'DM Sans'" }}>쿠폰 회수 가격 (USDT)</div>
+                <input type="number" value={couponRecoveryPrice} onChange={e => setCouponRecoveryPrice(e.target.value)}
+                  placeholder="1778.23" style={S.inp} />
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: T.textDim, marginBottom: 6, fontFamily: "'DM Sans'" }}>쿠폰 금액 (USDT)</div>
+                <input type="number" value={couponAmount} onChange={e => setCouponAmount(e.target.value)}
+                  placeholder="500" style={S.inp} />
+              </div>
+
+              {couponCalc ? (
+                <div style={{
+                  padding: 14, borderRadius: 10,
+                  background: T.bgCard, border: `1px solid ${T.border}`,
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                    <span style={{ fontSize: 11, color: T.textDim, fontFamily: "'DM Sans'" }}>현재가 → 회수가 거리</span>
+                    <span style={{
+                      fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans'",
+                      color: Math.abs(couponCalc.distance) < 5 ? T.danger : T.text,
+                    }}>
+                      {fmt(Math.abs(couponCalc.distance), 2)}%
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                    <span style={{ fontSize: 11, color: T.textDim, fontFamily: "'DM Sans'" }}>회수 시 예상 손실</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: T.danger, fontFamily: "'DM Sans'" }}>
+                      {fmtS(couponCalc.expectedLoss, 2)} USDT
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                    <span style={{ fontSize: 11, color: T.textDim, fontFamily: "'DM Sans'" }}>현재 강청가</span>
+                    <span style={{ fontSize: 13, color: T.text, fontFamily: "'DM Sans'" }}>
+                      {couponCalc.currentLiq ? fmt(couponCalc.currentLiq, 2) : "—"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, color: T.textDim, fontFamily: "'DM Sans'" }}>회수 후 새 강청가</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: T.warning, fontFamily: "'DM Sans'" }}>
+                      {couponCalc.newLiq ? fmt(couponCalc.newLiq, 2) : "—"}
+                    </span>
+                  </div>
+
+                  {couponCalc.recoveryCloser && (
+                    <div style={{
+                      marginTop: 10, padding: 10, borderRadius: 6,
+                      background: `${T.warning}10`, border: `1px solid ${T.warning}33`,
+                      fontSize: 11, color: T.warning, lineHeight: 1.5, fontFamily: "'DM Sans'",
+                    }}>
+                      쿠폰 회수가가 강청가보다 가깝습니다. 회수 발동 시 전체 포지션이 시장가로 청산됩니다.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{
+                  padding: 14, borderRadius: 10, textAlign: "center",
+                  background: T.bgCard, border: `1px dashed ${T.border}`,
+                  fontSize: 12, color: T.textDim, fontFamily: "'DM Sans'",
+                }}>
+                  쿠폰 회수가격과 쿠폰 금액을 입력하면<br />결과가 표시됩니다
+                </div>
+              )}
+
+              <button onClick={() => setCouponModalOpen(false)} style={{
+                width: "100%", marginTop: 16, padding: "10px 0",
+                borderRadius: 8, border: `1px solid ${T.border}`,
+                background: "transparent", color: T.textMuted,
+                cursor: "pointer", fontSize: 12, fontFamily: "'DM Sans'",
+              }}>
+                닫기
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ══════ GUIDE MODAL ══════ */}
         {guideOpen && (
           <div style={{
             position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-            background: "#000000cc", zIndex: 300,
+            background: T.bgOverlay, zIndex: 300,
             display: "flex", alignItems: "flex-start", justifyContent: "center",
             padding: 20, overflowY: "auto",
           }} onClick={() => setGuideOpen(false)}>
             <div style={{
               width: "100%", maxWidth: 520, margin: "40px 0", padding: 0, borderRadius: 16,
-              background: "#0c0c16", border: "1px solid #1e1e2e",
+              background: T.bgDropdown, border: `1px solid ${T.border}`,
               boxShadow: "0 20px 60px #000000cc",
               fontFamily: "'DM Sans'", overflow: "hidden",
             }} onClick={(e) => e.stopPropagation()}>
 
               {/* Header */}
-              <div style={{ padding: "24px 24px 16px", borderBottom: "1px solid #1e1e2e" }}>
+              <div style={{ padding: "24px 24px 16px", borderBottom: `1px solid ${T.border}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: "#f1f5f9", letterSpacing: -0.5 }}>POSITION LAB</div>
-                    <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>사용 가이드</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: T.textBright2, letterSpacing: -0.5 }}>POSITION LAB</div>
+                    <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>사용 가이드</div>
                   </div>
                   <button onClick={() => setGuideOpen(false)} style={{
-                    background: "transparent", border: "none", color: "#4b5563",
+                    background: "transparent", border: "none", color: T.textDim,
                     fontSize: 18, cursor: "pointer", padding: "0 4px", lineHeight: 1,
                   }}>✕</button>
                 </div>
                 <div style={{
-                  fontSize: 9, color: "#4b5563", marginTop: 12, lineHeight: 1.6,
-                  padding: "8px 10px", borderRadius: 6, background: "#08080f", border: "1px solid #141420",
+                  fontSize: 9, color: T.textDim, marginTop: 12, lineHeight: 1.6,
+                  padding: "8px 10px", borderRadius: 6, background: T.bgCard, border: "1px solid #141420",
                 }}>
                   본 도구는 공개된 수학 공식을 기반으로 한 포지션 계산기이며, 투자 자문·매매 권유·수익 보장의 목적이 아닙니다. 모든 거래 판단과 책임은 이용자 본인에게 있으며, 본 도구의 결과를 근거로 발생한 손실에 대해 제작자 및 제공자는 어떠한 책임도 지지 않습니다.
                 </div>
@@ -2648,11 +3010,11 @@ export default function SimV4() {
 
                 {/* 기능 1 */}
                 <div style={{ marginBottom: 20 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: "#0ea5e915", border: "1px solid #0ea5e933", color: "#0ea5e9", fontSize: 10, fontWeight: 800 }}>1</span>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.textMid, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: `${T.accentBlue}15`, border: `1px solid ${T.accentBlue}33`, color: T.accentBlue, fontSize: 10, fontWeight: 800 }}>1</span>
                     사용 가능 금액 실시간 확인
                   </div>
-                  <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.7, paddingLeft: 28 }}>
+                  <div style={{ fontSize: 11, color: T.textMuted, lineHeight: 1.7, paddingLeft: 28 }}>
                     <div style={{ color: "#9ca3af", fontWeight: 600, marginBottom: 4 }}>언제 쓰나요?</div>
                     사용 가능 금액을 확인할 때
                     <div style={{ marginTop: 8 }}>
@@ -2666,7 +3028,7 @@ export default function SimV4() {
                           ].map(([k, v], i) => (
                             <tr key={i} style={{ borderBottom: "1px solid #141420" }}>
                               <td style={{ padding: "5px 8px", color: "#9ca3af", whiteSpace: "nowrap" }}>{k}</td>
-                              <td style={{ padding: "5px 8px", color: "#6b7280" }}>{v}</td>
+                              <td style={{ padding: "5px 8px", color: T.textMuted }}>{v}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -2675,15 +3037,15 @@ export default function SimV4() {
                   </div>
                 </div>
 
-                <div style={{ height: 1, background: "#1e1e2e", margin: "0 0 20px 28px" }} />
+                <div style={{ height: 1, background: T.border, margin: "0 0 20px 28px" }} />
 
                 {/* 기능 2 */}
                 <div style={{ marginBottom: 20 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: "#0ea5e915", border: "1px solid #0ea5e933", color: "#0ea5e9", fontSize: 10, fontWeight: 800 }}>2</span>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.textMid, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: `${T.accentBlue}15`, border: `1px solid ${T.accentBlue}33`, color: T.accentBlue, fontSize: 10, fontWeight: 800 }}>2</span>
                     목표 사용 가능 금액
                   </div>
-                  <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.7, paddingLeft: 28 }}>
+                  <div style={{ fontSize: 11, color: T.textMuted, lineHeight: 1.7, paddingLeft: 28 }}>
                     <div style={{ color: "#9ca3af", fontWeight: 600, marginBottom: 4 }}>언제 쓰나요?</div>
                     예시: 현재 사용가능 금액이 300 USDT밖에 없는데<br />
                     "추가 진입하려면 1,500 USDT가 필요한데, 가격이 얼마나 올라야 확보할 수 있지?" 할 때
@@ -2699,7 +3061,7 @@ export default function SimV4() {
                           ].map(([k, v], i) => (
                             <tr key={i} style={{ borderBottom: "1px solid #141420" }}>
                               <td style={{ padding: "5px 8px", color: "#9ca3af", whiteSpace: "nowrap" }}>{k}</td>
-                              <td style={{ padding: "5px 8px", color: "#6b7280" }}>{v}</td>
+                              <td style={{ padding: "5px 8px", color: T.textMuted }}>{v}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -2708,15 +3070,15 @@ export default function SimV4() {
                   </div>
                 </div>
 
-                <div style={{ height: 1, background: "#1e1e2e", margin: "0 0 20px 28px" }} />
+                <div style={{ height: 1, background: T.border, margin: "0 0 20px 28px" }} />
 
                 {/* 기능 3 */}
                 <div style={{ marginBottom: 20 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: "#0ea5e915", border: "1px solid #0ea5e933", color: "#0ea5e9", fontSize: 10, fontWeight: 800 }}>3</span>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.textMid, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: `${T.accentBlue}15`, border: `1px solid ${T.accentBlue}33`, color: T.accentBlue, fontSize: 10, fontWeight: 800 }}>3</span>
                     롱숏 동시청산 시뮬레이션
                   </div>
-                  <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.7, paddingLeft: 28 }}>
+                  <div style={{ fontSize: 11, color: T.textMuted, lineHeight: 1.7, paddingLeft: 28 }}>
                     <div style={{ color: "#9ca3af", fontWeight: 600, marginBottom: 4 }}>언제 쓰나요?</div>
                     같은 코인에 롱과 숏을 동시에 보유 중일 때, 둘 다 청산하면 최종 손익이 얼마인지 확인할 때
                     <div style={{ color: "#9ca3af", fontWeight: 600, marginTop: 10, marginBottom: 4 }}>사용 방법</div>
@@ -2726,15 +3088,15 @@ export default function SimV4() {
                   </div>
                 </div>
 
-                <div style={{ height: 1, background: "#1e1e2e", margin: "0 0 20px 28px" }} />
+                <div style={{ height: 1, background: T.border, margin: "0 0 20px 28px" }} />
 
                 {/* 기능 4 */}
                 <div style={{ marginBottom: 20 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: "#0ea5e915", border: "1px solid #0ea5e933", color: "#0ea5e9", fontSize: 10, fontWeight: 800 }}>4</span>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.textMid, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: `${T.accentBlue}15`, border: `1px solid ${T.accentBlue}33`, color: T.accentBlue, fontSize: 10, fontWeight: 800 }}>4</span>
                     동시청산 목표 익절가
                   </div>
-                  <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.7, paddingLeft: 28 }}>
+                  <div style={{ fontSize: 11, color: T.textMuted, lineHeight: 1.7, paddingLeft: 28 }}>
                     <div style={{ color: "#9ca3af", fontWeight: 600, marginBottom: 4 }}>언제 쓰나요?</div>
                     "롱숏 동시에 닫아서 1,000 USDT 익절하고 싶은데, 가격이 얼마가 되어야 하지?" 할 때
                     <div style={{ color: "#9ca3af", fontWeight: 600, marginTop: 10, marginBottom: 4 }}>사용 방법</div>
@@ -2743,37 +3105,37 @@ export default function SimV4() {
                   </div>
                 </div>
 
-                <div style={{ height: 1, background: "#1e1e2e", margin: "0 0 20px 28px" }} />
+                <div style={{ height: 1, background: T.border, margin: "0 0 20px 28px" }} />
 
                 {/* 기능 5 */}
                 <div style={{ marginBottom: 20 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: "#0ea5e915", border: "1px solid #0ea5e933", color: "#0ea5e9", fontSize: 10, fontWeight: 800 }}>5</span>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.textMid, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: `${T.accentBlue}15`, border: `1px solid ${T.accentBlue}33`, color: T.accentBlue, fontSize: 10, fontWeight: 800 }}>5</span>
                     한쪽 포지션 부분청산 시뮬레이션
                   </div>
-                  <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.7, paddingLeft: 28 }}>
+                  <div style={{ fontSize: 11, color: T.textMuted, lineHeight: 1.7, paddingLeft: 28 }}>
                     <div style={{ color: "#9ca3af", fontWeight: 600, marginBottom: 4 }}>언제 쓰나요?</div>
                     물린 포지션의 일부를 손절해서 마진을 확보하거나, 리스크를 줄이고 싶을 때
                     <div style={{ color: "#9ca3af", fontWeight: 600, marginTop: 10, marginBottom: 4 }}>사용 방법</div>
-                    포지션 카드 → 물타기 → <span style={{ color: "#e2e8f0", fontWeight: 600 }}>부분 청산</span> 선택<br />
+                    포지션 카드 → 물타기 → <span style={{ color: T.textMid, fontWeight: 600 }}>부분 청산</span> 선택<br />
                     → 손절 비율 설정 (25% / 50% / 75% / 100%)<br />
                     → 실현 손익, Before/After 비교, 손절 후 사용 가능 금액 확인
                   </div>
                 </div>
 
-                <div style={{ height: 1, background: "#1e1e2e", margin: "0 0 20px 28px" }} />
+                <div style={{ height: 1, background: T.border, margin: "0 0 20px 28px" }} />
 
                 {/* 기능 6 */}
                 <div style={{ marginBottom: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: "#0ea5e915", border: "1px solid #0ea5e933", color: "#0ea5e9", fontSize: 10, fontWeight: 800 }}>6</span>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.textMid, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, background: `${T.accentBlue}15`, border: `1px solid ${T.accentBlue}33`, color: T.accentBlue, fontSize: 10, fontWeight: 800 }}>6</span>
                     반대 포지션 진입 시 청산가 변화
                   </div>
-                  <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.7, paddingLeft: 28 }}>
+                  <div style={{ fontSize: 11, color: T.textMuted, lineHeight: 1.7, paddingLeft: 28 }}>
                     <div style={{ color: "#9ca3af", fontWeight: 600, marginBottom: 4 }}>언제 쓰나요?</div>
                     기존 포지션을 보유한 상태에서 반대 방향으로 포지션 진입했을 때, 강제 청산가가 어떻게 변하는지 미리 확인할 때
                     <div style={{ color: "#9ca3af", fontWeight: 600, marginTop: 10, marginBottom: 4 }}>사용 방법</div>
-                    포지션 카드 → <span style={{ color: "#e2e8f0", fontWeight: 600 }}>헷지</span> 클릭<br />
+                    포지션 카드 → <span style={{ color: T.textMid, fontWeight: 600 }}>헷지</span> 클릭<br />
                     → 진입가, 투입금액, 레버리지 입력<br />
                     → 강제 청산가 변화 (기존 → 헷지 후), 본전가, 동시청산 시 순손익 확인
                   </div>
@@ -2792,9 +3154,9 @@ export default function SimV4() {
           ].map((tab) => (
             <button key={tab.id} onClick={() => setAppTab(tab.id)} style={{
               flex: 1, padding: "12px 0", fontSize: 13, fontWeight: 700, borderRadius: 10,
-              border: `1px solid ${appTab === tab.id ? "#0ea5e944" : "#1e1e2e"}`,
-              background: appTab === tab.id ? "#0ea5e910" : "transparent",
-              color: appTab === tab.id ? "#0ea5e9" : "#4b5563",
+              border: `1px solid ${appTab === tab.id ? `${T.accentBlue}44` : T.border}`,
+              background: appTab === tab.id ? `${T.accentBlue}10` : "transparent",
+              color: appTab === tab.id ? T.accentBlue : T.textDim,
               cursor: "pointer", fontFamily: "'DM Sans'", transition: "all 0.15s",
               letterSpacing: 0.5,
             }}>{tab.label}</button>
@@ -2812,7 +3174,7 @@ export default function SimV4() {
           </Fld>
           <div style={{ flex: 1 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-              <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "'DM Sans'" }}>
+              <div style={{ fontSize: 11, color: T.textMuted, fontFamily: "'DM Sans'" }}>
                 현재가 ($)
               </div>
               <button onClick={() => {
@@ -2820,15 +3182,15 @@ export default function SimV4() {
                 else { setPriceMode("live"); setFetchError(false); }
               }} style={{
                 ...S.miniBtn, fontSize: 9, padding: "2px 8px",
-                color: priceMode === "live" ? "#34d399" : "#6b7280",
-                borderColor: priceMode === "live" ? "#34d39933" : "#1e1e2e",
+                color: priceMode === "live" ? T.accent : T.textMuted,
+                borderColor: priceMode === "live" ? `${T.accent}33` : T.border,
               }}>
                 {priceMode === "live" ? "✎ 수동 전환" : "↻ 실시간"}
               </button>
             </div>
             {usedCoins.map(coin => (
               <div key={coin} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center" }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", width: 40, textAlign: "right", fontFamily: "'IBM Plex Mono'" }}>{coin}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: T.textSub, width: 40, textAlign: "right", fontFamily: "'IBM Plex Mono'" }}>{coin}</span>
                 <input
                   type="number"
                   value={coinPrices[coin] || ""}
@@ -2837,29 +3199,29 @@ export default function SimV4() {
                   onChange={(e) => setCp(coin, e.target.value)}
                   style={{
                     ...S.inp, flex: 1,
-                    borderColor: priceMode === "live" ? "#34d39944" : "#1e1e2e",
-                    background: priceMode === "live" ? "#060d08" : "#0a0a12",
+                    borderColor: priceMode === "live" ? `${T.accent}44` : T.border,
+                    background: priceMode === "live" ? "#060d08" : T.bgInput,
                     cursor: priceMode === "live" ? "default" : "text",
                     transition: "color 0.3s, border-color 0.3s, background 0.3s",
                   }}
                 />
               </div>
             ))}
-            <div style={{ fontSize: 9, marginTop: 3, color: "#4b5563", fontFamily: "'DM Sans'" }}>
+            <div style={{ fontSize: 9, marginTop: 3, color: T.textDim, fontFamily: "'DM Sans'" }}>
               {fetchError ? (
-                <span style={{ color: "#f87171" }}>연결 실패 · 수동 입력 모드</span>
+                <span style={{ color: T.danger }}>연결 실패 · 수동 입력 모드</span>
               ) : priceMode === "live" ? (
-                <span style={{ color: "#34d399", display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ color: T.accent, display: "flex", alignItems: "center", gap: 4 }}>
                   <span style={{
                     display: "inline-block", width: 4, height: 4, borderRadius: "50%",
-                    background: "#34d399", boxShadow: "0 0 6px #34d39966",
+                    background: T.accent, boxShadow: `0 0 6px ${T.accent}66`,
                   }} />
                   Binance Futures 실시간 · {usedCoins.join(", ")}
                 </span>
               ) : (
                 <span>수동 입력 중 · <span
                   onClick={() => { setPriceMode("live"); setFetchError(false); }}
-                  style={{ color: "#0ea5e9", cursor: "pointer", textDecoration: "underline" }}
+                  style={{ color: T.accentBlue, cursor: "pointer", textDecoration: "underline" }}
                 >실시간 전환</span></span>
               )}
             </div>
@@ -2867,7 +3229,7 @@ export default function SimV4() {
         </div>
         <div style={{ ...S.grid2, marginTop: 8 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, fontFamily: "'DM Sans'" }}>
+            <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4, fontFamily: "'DM Sans'" }}>
               거래소 강제 청산가 ($)
             </div>
             {usedCoins.map(coin => {
@@ -2877,14 +3239,14 @@ export default function SimV4() {
               const hasAuto = !isRef && !hasManual && autoVal != null && autoVal > 0;
               return (
                 <div key={coin} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center" }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", width: 40, textAlign: "right", fontFamily: "'IBM Plex Mono'" }}>{coin}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: T.textSub, width: 40, textAlign: "right", fontFamily: "'IBM Plex Mono'" }}>{coin}</span>
                   {hasAuto ? (
                     <div style={{
                       ...S.inp, flex: 1, display: "flex", alignItems: "center", justifyContent: "space-between",
-                      background: "#060a10", borderColor: "#0ea5e922", cursor: "default",
+                      background: "#060a10", borderColor: `${T.accentBlue}22`, cursor: "default",
                     }}>
-                      <span style={{ color: "#0ea5e9", fontSize: 13, fontWeight: 500 }}>{fmt(autoVal, autoVal > 100 ? 2 : 4)}</span>
-                      <span style={{ fontSize: 9, color: "#0ea5e966", fontFamily: "'DM Sans'", whiteSpace: "nowrap", marginLeft: 8 }}>자동</span>
+                      <span style={{ color: T.accentBlue, fontSize: 13, fontWeight: 500 }}>{fmt(autoVal, autoVal > 100 ? 2 : 4)}</span>
+                      <span style={{ fontSize: 9, color: `${T.accentBlue}66`, fontFamily: "'DM Sans'", whiteSpace: "nowrap", marginLeft: 8 }}>자동</span>
                     </div>
                   ) : (
                     <Inp value={coinLiqPrices[coin] || ""} onChange={(v) => setLiqPrice(coin, v)} ph="거래소에서 확인" />
@@ -2893,7 +3255,7 @@ export default function SimV4() {
               );
             })}
             {usedCoins.length > 1 && calc?.mmRate && (
-              <div style={{ fontSize: 9, color: "#0ea5e966", marginTop: 2, fontFamily: "'DM Sans'" }}>
+              <div style={{ fontSize: 9, color: `${T.accentBlue}66`, marginTop: 2, fontFamily: "'DM Sans'" }}>
                 💡 {calc.calcRefCoin} 청산가 기준으로 타 코인 자동 계산 (현재가 고정 가정)
               </div>
             )}
@@ -2939,37 +3301,37 @@ export default function SimV4() {
           <div style={{
             marginTop: 16, padding: 20, borderRadius: 12,
             background: "linear-gradient(135deg, #0a0e1a 0%, #080c16 100%)",
-            border: "1px solid #0ea5e922",
+            border: `1px solid ${T.accentBlue}22`,
           }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#0ea5e9", fontFamily: "'DM Sans'", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.accentBlue, fontFamily: "'DM Sans'", marginBottom: 12 }}>
               📋 시작하기
             </div>
-            <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.8, fontFamily: "'DM Sans'" }}>
+            <div style={{ fontSize: 12, color: T.textSub, lineHeight: 1.8, fontFamily: "'DM Sans'" }}>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 6 }}>
-                <span style={{ color: !n(wallet) ? "#f59e0b" : "#34d399", fontWeight: 700, minWidth: 16 }}>{!n(wallet) ? "①" : "✓"}</span>
-                <span>거래소에서 <strong style={{ color: "#e2e8f0" }}>지갑 총 잔고</strong>를 확인하고 입력하세요</span>
+                <span style={{ color: !n(wallet) ? T.warning : T.accent, fontWeight: 700, minWidth: 16 }}>{!n(wallet) ? "①" : "✓"}</span>
+                <span>거래소에서 <strong style={{ color: T.textMid }}>지갑 총 잔고</strong>를 확인하고 입력하세요</span>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 6 }}>
-                <span style={{ color: !positions.some(p => n(p.entryPrice) > 0 && n(p.margin) > 0) ? "#f59e0b" : "#34d399", fontWeight: 700, minWidth: 16 }}>
+                <span style={{ color: !positions.some(p => n(p.entryPrice) > 0 && n(p.margin) > 0) ? T.warning : T.accent, fontWeight: 700, minWidth: 16 }}>
                   {!positions.some(p => n(p.entryPrice) > 0 && n(p.margin) > 0) ? "②" : "✓"}
                 </span>
                 <div>
-                  <span>보유 중인 <strong style={{ color: "#e2e8f0" }}>모든 포지션</strong>의 <strong style={{ color: "#e2e8f0" }}>오픈 균일가</strong>, <strong style={{ color: "#e2e8f0" }}>마진</strong>, <strong style={{ color: "#e2e8f0" }}>레버리지</strong>를 입력하세요</span>
-                  <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>※ 교차 마진에서는 모든 포지션이 청산가에 영향을 줍니다</div>
+                  <span>보유 중인 <strong style={{ color: T.textMid }}>모든 포지션</strong>의 <strong style={{ color: T.textMid }}>오픈 균일가</strong>, <strong style={{ color: T.textMid }}>마진</strong>, <strong style={{ color: T.textMid }}>레버리지</strong>를 입력하세요</span>
+                  <div style={{ fontSize: 10, color: T.textMuted, marginTop: 2 }}>※ 교차 마진에서는 모든 포지션이 청산가에 영향을 줍니다</div>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 6 }}>
-                <span style={{ color: !Object.values(coinLiqPrices).some(v => n(v) > 0) ? "#f59e0b" : "#34d399", fontWeight: 700, minWidth: 16 }}>
+                <span style={{ color: !Object.values(coinLiqPrices).some(v => n(v) > 0) ? T.warning : T.accent, fontWeight: 700, minWidth: 16 }}>
                   {!Object.values(coinLiqPrices).some(v => n(v) > 0) ? "③" : "✓"}
                 </span>
                 <div>
-                  <span>거래소에 표시된 <strong style={{ color: "#e2e8f0" }}>강제 청산가</strong>를 입력하세요</span>
-                  <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>※ 미입력 시 청산가 예측 기능이 비활성화됩니다</div>
+                  <span>거래소에 표시된 <strong style={{ color: T.textMid }}>강제 청산가</strong>를 입력하세요</span>
+                  <div style={{ fontSize: 10, color: T.textMuted, marginTop: 2 }}>※ 미입력 시 청산가 예측 기능이 비활성화됩니다</div>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                <span style={{ color: hasAnyPrice ? "#34d399" : "#f59e0b", fontWeight: 700, minWidth: 16 }}>{hasAnyPrice ? "✓" : "④"}</span>
-                <span style={{ color: hasAnyPrice ? "#94a3b8" : "#6b7280" }}>현재가에서 <strong style={{ color: hasAnyPrice ? "#94a3b8" : "#e2e8f0" }}>실시간 전환</strong>을 누르거나 직접 입력하면 시뮬레이션이 시작됩니다</span>
+                <span style={{ color: hasAnyPrice ? T.accent : T.warning, fontWeight: 700, minWidth: 16 }}>{hasAnyPrice ? "✓" : "④"}</span>
+                <span style={{ color: hasAnyPrice ? T.textSub : T.textMuted }}>현재가에서 <strong style={{ color: hasAnyPrice ? T.textSub : T.textMid }}>실시간 전환</strong>을 누르거나 직접 입력하면 시뮬레이션이 시작됩니다</span>
               </div>
             </div>
           </div>
@@ -2981,13 +3343,13 @@ export default function SimV4() {
             <Sec label="계좌 요약" />
             <div style={S.summaryGrid}>
               <SumCard label="총 미실현 PnL" value={`${fmtS(calc.totalPnL)} USDT`}
-                color={calc.totalPnL >= 0 ? "#34d399" : "#f87171"} />
+                color={calc.totalPnL >= 0 ? T.accent : T.danger} />
               <SumCard label="유효 잔고 (Equity)" value={`${fmt(calc.equity)} USDT`}
-                color="#e2e8f0" />
+                color=T.textMid />
               <SumCard label="사용 마진" value={`${fmt(calc.totalMargin)} USDT`}
-                color="#94a3b8" />
+                color=T.textSub />
               <SumCard label="사용 가능" value={`${fmt(calc.freeMargin)} USDT`}
-                color={calc.freeMargin > 0 ? "#34d399" : "#f87171"}
+                color={calc.freeMargin > 0 ? T.accent : T.danger}
                 sub="미실현 이익 미반영 (Bybit)" />
             </div>
 
@@ -2995,40 +3357,40 @@ export default function SimV4() {
             <div style={S.availBox}>
               <div style={S.availRow}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>목표 사용 가능 금액</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 4 }}>목표 사용 가능 금액</div>
                   <Inp value={targetAvail} onChange={setTargetAvail} ph="목표 금액 (USDT)" />
                 </div>
                 <div style={{ flex: 1, paddingLeft: 12, display: "flex", alignItems: "flex-end" }}>
                   {calc.availCalc ? (
                     calc.availCalc.sufficient ? (
-                      <div style={{ fontSize: 13, color: "#34d399", fontWeight: 600, paddingBottom: 10 }}>
+                      <div style={{ fontSize: 13, color: T.accent, fontWeight: 600, paddingBottom: 10 }}>
                         ✓ 현재 충분
                       </div>
                     ) : calc.availCalc.impossible ? (
                       <div style={{ paddingBottom: 6 }}>
-                        <div style={{ fontSize: 10, color: "#f87171", fontWeight: 600, marginBottom: 4 }}>
+                        <div style={{ fontSize: 10, color: T.danger, fontWeight: 600, marginBottom: 4 }}>
                           가격 변동만으로 도달 불가
                         </div>
-                        <div style={{ fontSize: 11, color: "#94a3b8" }}>
-                          최대 확보 가능: <span style={{ color: "#f59e0b", fontWeight: 600 }}>{fmt(calc.availCalc.maxAvail)} USDT</span>
+                        <div style={{ fontSize: 11, color: T.textSub }}>
+                          최대 확보 가능: <span style={{ color: T.warning, fontWeight: 600 }}>{fmt(calc.availCalc.maxAvail)} USDT</span>
                         </div>
-                        <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>
+                        <div style={{ fontSize: 10, color: T.textDim, marginTop: 2 }}>
                           (${fmt(calc.availCalc.maxAvailPrice)} · {fmtS(calc.availCalc.maxChangePct)}%)
                         </div>
                       </div>
                     ) : (
                       <div style={{ paddingBottom: 6 }}>
-                        <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>필요 가격</div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: "#0ea5e9", fontFamily: "'DM Sans'" }}>
+                        <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>필요 가격</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: T.accentBlue, fontFamily: "'DM Sans'" }}>
                           ${fmt(calc.availCalc.neededPrice)}
                         </div>
-                        <div style={{ fontSize: 11, color: calc.availCalc.direction === "up" ? "#34d399" : "#f87171", marginTop: 2 }}>
+                        <div style={{ fontSize: 11, color: calc.availCalc.direction === "up" ? T.accent : T.danger, marginTop: 2 }}>
                           현재가 대비 {fmtS(calc.availCalc.changePct)}% {calc.availCalc.direction === "up" ? "↑" : "↓"}
                         </div>
                       </div>
                     )
                   ) : (
-                    <div style={{ fontSize: 11, color: "#333", paddingBottom: 10 }}>
+                    <div style={{ fontSize: 11, color: T.textEmpty, paddingBottom: 10 }}>
                       금액 입력 시 필요 가격 표시
                     </div>
                   )}
@@ -3037,42 +3399,42 @@ export default function SimV4() {
 
               {/* 달성 방법 가이드 */}
               {calc.availCalc && !calc.availCalc.sufficient && (
-                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #1e1e2e" }}>
-                  <div style={{ fontSize: 10, color: "#0ea5e9", fontWeight: 700, letterSpacing: 1.5, fontFamily: "'DM Sans'", marginBottom: 10 }}>
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+                  <div style={{ fontSize: 10, color: T.accentBlue, fontWeight: 700, letterSpacing: 1.5, fontFamily: "'DM Sans'", marginBottom: 10 }}>
                     📊 달성 방법
                   </div>
 
                   {/* ① 가격 변동 분석 */}
                   {calc.availCalc.neededPrice && !calc.availCalc.impossible && (!calc.availCalc.coinAnalysis || calc.availCalc.coinAnalysis.length <= 1) && (
-                    <div style={{ padding: "8px 10px", borderRadius: 6, background: "#0ea5e908", border: "1px solid #0ea5e922", marginBottom: 8, fontSize: 11, color: "#94a3b8" }}>
-                      <span style={{ color: "#0ea5e9", fontWeight: 600 }}>① 가격 변동</span>
-                      {" · "}{calc.calcRefCoin} → <span style={{ fontWeight: 600, color: "#e2e8f0" }}>${fmt(calc.availCalc.neededPrice)}</span>
-                      <span style={{ color: calc.availCalc.direction === "up" ? "#34d399" : "#f87171", marginLeft: 4 }}>
+                    <div style={{ padding: "8px 10px", borderRadius: 6, background: `${T.accentBlue}08`, border: `1px solid ${T.accentBlue}22`, marginBottom: 8, fontSize: 11, color: T.textSub }}>
+                      <span style={{ color: T.accentBlue, fontWeight: 600 }}>① 가격 변동</span>
+                      {" · "}{calc.calcRefCoin} → <span style={{ fontWeight: 600, color: T.textMid }}>${fmt(calc.availCalc.neededPrice)}</span>
+                      <span style={{ color: calc.availCalc.direction === "up" ? T.accent : T.danger, marginLeft: 4 }}>
                         ({fmtS(calc.availCalc.changePct)}%)
                       </span>
                     </div>
                   )}
                   {(calc.availCalc.impossible || (calc.availCalc.coinAnalysis && calc.availCalc.coinAnalysis.length > 1)) && (
-                    <div style={{ padding: "8px 10px", borderRadius: 6, background: calc.availCalc.bestCoinSolution ? "#0ea5e908" : "#f8717108", border: `1px solid ${calc.availCalc.bestCoinSolution ? "#0ea5e922" : "#f8717122"}`, marginBottom: 8, fontSize: 11 }}>
-                      <div style={{ color: "#0ea5e9", fontWeight: 600, marginBottom: 6 }}>① 가격 변동 분석</div>
+                    <div style={{ padding: "8px 10px", borderRadius: 6, background: calc.availCalc.bestCoinSolution ? `${T.accentBlue}08` : `${T.danger}08`, border: `1px solid ${calc.availCalc.bestCoinSolution ? `${T.accentBlue}22` : `${T.danger}22`}`, marginBottom: 8, fontSize: 11 }}>
+                      <div style={{ color: T.accentBlue, fontWeight: 600, marginBottom: 6 }}>① 가격 변동 분석</div>
                       {calc.availCalc.coinAnalysis && calc.availCalc.coinAnalysis.map(ca => (
-                        <div key={ca.coin} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 0", borderBottom: "1px solid #0e0e18" }}>
+                        <div key={ca.coin} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 0", borderBottom: `1px solid ${T.borderSub}` }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <span style={{ fontWeight: 600, color: "#e2e8f0", fontSize: 10, width: 32 }}>{ca.coin}</span>
+                            <span style={{ fontWeight: 600, color: T.textMid, fontSize: 10, width: 32 }}>{ca.coin}</span>
                             {ca.isHedged && (
-                              <span style={{ fontSize: 8, padding: "1px 4px", borderRadius: 3, background: "#f59e0b15", color: "#f59e0b", border: "1px solid #f59e0b33", fontWeight: 600 }}>양방향</span>
+                              <span style={{ fontSize: 8, padding: "1px 4px", borderRadius: 3, background: `${T.warning}15`, color: T.warning, border: `1px solid ${T.warning}33`, fontWeight: 600 }}>양방향</span>
                             )}
                           </div>
-                          <div style={{ textAlign: "right", color: "#94a3b8" }}>
+                          <div style={{ textAlign: "right", color: T.textSub }}>
                             {ca.neededPrice ? (
                               <span>
-                                <span style={{ color: "#34d399", fontWeight: 600 }}>${fmt(ca.neededPrice)}</span>
-                                <span style={{ color: ca.changePct >= 0 ? "#34d399" : "#f87171", marginLeft: 3 }}>({fmtS(ca.changePct)}%)</span>
+                                <span style={{ color: T.accent, fontWeight: 600 }}>${fmt(ca.neededPrice)}</span>
+                                <span style={{ color: ca.changePct >= 0 ? T.accent : T.danger, marginLeft: 3 }}>({fmtS(ca.changePct)}%)</span>
                               </span>
                             ) : ca.reason === "양방향 포지션 — 가격 효과 상쇄" ? (
-                              <span style={{ color: "#f59e0b" }}>상쇄 · 최대 +{fmt(ca.maxGain)} USDT</span>
+                              <span style={{ color: T.warning }}>상쇄 · 최대 +{fmt(ca.maxGain)} USDT</span>
                             ) : (
-                              <span style={{ color: "#6b7280" }}>최대 +{fmt(ca.maxGain)} USDT</span>
+                              <span style={{ color: T.textMuted }}>최대 +{fmt(ca.maxGain)} USDT</span>
                             )}
                           </div>
                         </div>
@@ -3080,26 +3442,26 @@ export default function SimV4() {
                       {/* 결론 */}
                       <div style={{ marginTop: 6, fontSize: 10 }}>
                         {calc.availCalc.bestCoinSolution ? (
-                          <span style={{ color: "#0ea5e9", fontWeight: 600 }}>
+                          <span style={{ color: T.accentBlue, fontWeight: 600 }}>
                             💡 {calc.availCalc.bestCoinSolution.coin} 가격 변동으로 달성 가능
                           </span>
                         ) : calc.availCalc.impossible ? (
-                          <span style={{ color: "#f87171" }}>
+                          <span style={{ color: T.danger }}>
                             가격만으로 도달 불가 · 부족 <span style={{ fontWeight: 600 }}>{fmt(calc.availCalc.shortfall)} USDT</span>
-                            {calc.availCalc.hedgeDetected && <span style={{ color: "#f59e0b", marginLeft: 4 }}>(양방향 포지션으로 가격 효과 제한)</span>}
+                            {calc.availCalc.hedgeDetected && <span style={{ color: T.warning, marginLeft: 4 }}>(양방향 포지션으로 가격 효과 제한)</span>}
                           </span>
                         ) : null}
                       </div>
                     </div>
                   )}
                   {calc.availCalc.impossible && (!calc.availCalc.coinAnalysis || calc.availCalc.coinAnalysis.length <= 1) && (
-                    <div style={{ padding: "8px 10px", borderRadius: 6, background: "#f8717108", border: "1px solid #f8717122", marginBottom: 8, fontSize: 11, color: "#f87171" }}>
+                    <div style={{ padding: "8px 10px", borderRadius: 6, background: `${T.danger}08`, border: `1px solid ${T.danger}22`, marginBottom: 8, fontSize: 11, color: T.danger }}>
                       <span style={{ fontWeight: 600 }}>① 가격 변동</span> · 가격만으로 도달 불가
-                      <span style={{ color: "#94a3b8", marginLeft: 4 }}>
+                      <span style={{ color: T.textSub, marginLeft: 4 }}>
                         (최대 {fmt(calc.availCalc.maxAvail)} USDT, 부족 {fmt(calc.availCalc.shortfall)} USDT)
                       </span>
                       {calc.availCalc.hedgeDetected && (
-                        <div style={{ marginTop: 3, color: "#f59e0b", fontSize: 10 }}>
+                        <div style={{ marginTop: 3, color: T.warning, fontSize: 10 }}>
                           ⚠ 양방향 포지션으로 가격 변동 효과가 상쇄됩니다
                         </div>
                       )}
@@ -3108,38 +3470,38 @@ export default function SimV4() {
 
                   {/* ② 부분 청산 가이드 */}
                   {calc.availCalc.closeGuide && calc.availCalc.closeGuide.length > 0 && (
-                    <div style={{ padding: "8px 10px", borderRadius: 6, background: "#f59e0b08", border: "1px solid #f59e0b22", marginBottom: 8 }}>
-                      <div style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600, marginBottom: 8 }}>② 부분 청산으로 확보</div>
+                    <div style={{ padding: "8px 10px", borderRadius: 6, background: `${T.warning}08`, border: `1px solid ${T.warning}22`, marginBottom: 8 }}>
+                      <div style={{ fontSize: 11, color: T.warning, fontWeight: 600, marginBottom: 8 }}>② 부분 청산으로 확보</div>
                       {calc.availCalc.closeGuide.map((g, gi) => {
                         const isLast = gi === calc.availCalc.closeGuide.length - 1;
                         const balVal = g.neededPct !== null ? g.balChangeNeeded : g.balChangeMax;
-                        const balColor = balVal >= 0 ? "#34d399" : "#f87171";
+                        const balColor = balVal >= 0 ? T.accent : T.danger;
                         const safetyStyle = {
-                          safe: { bg: "#34d39915", color: "#34d399", border: "#34d39933", icon: "🛡", label: "안전" },
-                          caution: { bg: "#f59e0b15", color: "#f59e0b", border: "#f59e0b33", icon: "⚠", label: "주의" },
-                          danger: { bg: "#f8717115", color: "#f87171", border: "#f8717133", icon: "🔴", label: "위험" },
+                          safe: { bg: `${T.accent}15`, color: T.accent, border: `${T.accent}33`, icon: "🛡", label: "안전" },
+                          caution: { bg: `${T.warning}15`, color: T.warning, border: `${T.warning}33`, icon: "⚠", label: "주의" },
+                          danger: { bg: `${T.danger}15`, color: T.danger, border: `${T.danger}33`, icon: "🔴", label: "위험" },
                         }[g.liqSafetyTag] || null;
                         return (
                           <div key={g.id} style={{
-                            padding: "8px 0", borderBottom: isLast ? "none" : "1px solid #1e1e2e",
+                            padding: "8px 0", borderBottom: isLast ? "none" : `1px solid ${T.border}`,
                           }}>
                             {/* 1줄: 코인/방향 + PnL태그 + 청산가태그 */}
                             <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
                               {g.isRecommended && (
                                 <span style={{
                                   fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 3,
-                                  background: "#0ea5e920", color: "#0ea5e9", border: "1px solid #0ea5e944",
+                                  background: `${T.accentBlue}20`, color: T.accentBlue, border: `1px solid ${T.accentBlue}44`,
                                   fontFamily: "'DM Sans'",
                                 }}>추천</span>
                               )}
-                              <span style={{ color: g.dir === "long" ? "#34d399" : "#f87171", fontWeight: 600, fontSize: 10 }}>
+                              <span style={{ color: g.dir === "long" ? T.accent : T.danger, fontWeight: 600, fontSize: 10 }}>
                                 {g.coin} {g.dirKr}
                               </span>
                               <span style={{
                                 fontSize: 8, fontWeight: 600, padding: "1px 4px", borderRadius: 3,
-                                background: g.isProfitable ? "#34d39915" : "#f8717115",
-                                color: g.isProfitable ? "#34d399" : "#f87171",
-                                border: `1px solid ${g.isProfitable ? "#34d39933" : "#f8717133"}`,
+                                background: g.isProfitable ? `${T.accent}15` : `${T.danger}15`,
+                                color: g.isProfitable ? T.accent : T.danger,
+                                border: `1px solid ${g.isProfitable ? `${T.accent}33` : `${T.danger}33`}`,
                               }}>
                                 {g.isProfitable ? "✨ 무손실" : "💸 손실확정"}
                               </span>
@@ -3156,20 +3518,20 @@ export default function SimV4() {
                             {/* 2줄: 청산% + 확보금액 + 마진 변화 */}
                             <div style={{ fontSize: 11, marginTop: 4 }}>
                               {g.neededPct !== null ? (
-                                <span style={{ color: "#e2e8f0" }}>
-                                  <span style={{ fontWeight: 700, color: "#f59e0b" }}>{fmt(g.neededPct, 1)}%</span> 청산 → <span style={{ color: "#34d399", fontWeight: 600 }}>+{fmt(g.neededPct * g.freed1Pct)} USDT</span> 확보
-                                  <span style={{ color: "#6b7280", marginLeft: 6 }}>
-                                    · 마진 {fmt(g.margin)} → <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{fmt(g.margin * (1 - g.neededPct / 100))}</span>
+                                <span style={{ color: T.textMid }}>
+                                  <span style={{ fontWeight: 700, color: T.warning }}>{fmt(g.neededPct, 1)}%</span> 청산 → <span style={{ color: T.accent, fontWeight: 600 }}>+{fmt(g.neededPct * g.freed1Pct)} USDT</span> 확보
+                                  <span style={{ color: T.textMuted, marginLeft: 6 }}>
+                                    · 마진 {fmt(g.margin)} → <span style={{ color: T.textMid, fontWeight: 600 }}>{fmt(g.margin * (1 - g.neededPct / 100))}</span>
                                   </span>
                                 </span>
                               ) : (
-                                <span style={{ color: "#6b7280" }}>
-                                  전량 청산해도 부족 <span style={{ color: "#94a3b8" }}>(최대 +{fmt(g.maxFreed)} USDT · 마진 {fmt(g.margin)} → 0)</span>
+                                <span style={{ color: T.textMuted }}>
+                                  전량 청산해도 부족 <span style={{ color: T.textSub }}>(최대 +{fmt(g.maxFreed)} USDT · 마진 {fmt(g.margin)} → 0)</span>
                                 </span>
                               )}
                             </div>
                             {/* 3줄: 잔고 변화 + 청산가 여유 변화 */}
-                            <div style={{ fontSize: 10, color: "#6b7280", marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <div style={{ fontSize: 10, color: T.textMuted, marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
                               <span>
                                 잔고 <span style={{ color: balColor, fontWeight: 600 }}>{fmtS(balVal)} USDT</span>
                                 {g.isProfitable ? (
@@ -3180,23 +3542,23 @@ export default function SimV4() {
                               </span>
                               {g.liqDistChange != null && g.newLiq != null && calc.exLiq > 0 ? (
                                 <span>
-                                  청산가 <span style={{ color: "#94a3b8" }}>${fmt(calc.exLiq)}</span>
+                                  청산가 <span style={{ color: T.textSub }}>${fmt(calc.exLiq)}</span>
                                   {" → "}
-                                  <span style={{ color: Math.abs(g.newLiqDist) > Math.abs(g.curLiqDist) ? "#34d399" : "#f87171", fontWeight: 600 }}>
+                                  <span style={{ color: Math.abs(g.newLiqDist) > Math.abs(g.curLiqDist) ? T.accent : T.danger, fontWeight: 600 }}>
                                     ${fmt(g.newLiq)}
                                   </span>
-                                  <span style={{ color: "#6b7280", marginLeft: 3 }}>
+                                  <span style={{ color: T.textMuted, marginLeft: 3 }}>
                                     (여유 {fmt(Math.abs(g.curLiqDist), 1)}% → {fmt(Math.abs(g.newLiqDist), 1)}%)
                                   </span>
                                 </span>
                               ) : g.liqSafetyTag === "unknown" ? (
-                                <span style={{ color: "#333" }}>청산가 미입력</span>
+                                <span style={{ color: T.textEmpty }}>청산가 미입력</span>
                               ) : null}
                             </div>
                           </div>
                         );
                       })}
-                      <div style={{ fontSize: 9, color: "#4b5563", marginTop: 4, fontFamily: "'DM Sans'" }}>
+                      <div style={{ fontSize: 9, color: T.textDim, marginTop: 4, fontFamily: "'DM Sans'" }}>
                         안전 등급순 · 청산가 시뮬레이션 기반
                       </div>
                     </div>
@@ -3204,17 +3566,17 @@ export default function SimV4() {
 
                   {/* ③ 추가 입금 */}
                   {calc.availCalc.depositNeeded > 0 && (
-                    <div style={{ padding: "8px 10px", borderRadius: 6, background: "#34d39908", border: "1px solid #34d39922", fontSize: 11, color: "#94a3b8" }}>
+                    <div style={{ padding: "8px 10px", borderRadius: 6, background: `${T.accent}08`, border: `1px solid ${T.accent}22`, fontSize: 11, color: T.textSub }}>
                       <div>
-                        <span style={{ color: "#34d399", fontWeight: 600 }}>③ 추가 입금</span>
-                        {" · "}지갑에 <span style={{ fontWeight: 700, color: "#34d399" }}>{fmt(calc.availCalc.depositNeeded)} USDT</span> 입금 시 즉시 달성
+                        <span style={{ color: T.accent, fontWeight: 600 }}>③ 추가 입금</span>
+                        {" · "}지갑에 <span style={{ fontWeight: 700, color: T.accent }}>{fmt(calc.availCalc.depositNeeded)} USDT</span> 입금 시 즉시 달성
                       </div>
                       {calc.availCalc.depositLiq != null && calc.exLiq > 0 && (
-                        <div style={{ fontSize: 10, color: "#6b7280", marginTop: 4 }}>
-                          청산가 <span style={{ color: "#94a3b8" }}>${fmt(calc.exLiq)}</span>
+                        <div style={{ fontSize: 10, color: T.textMuted, marginTop: 4 }}>
+                          청산가 <span style={{ color: T.textSub }}>${fmt(calc.exLiq)}</span>
                           {" → "}
-                          <span style={{ color: "#34d399", fontWeight: 600 }}>${fmt(calc.availCalc.depositLiq)}</span>
-                          <span style={{ color: "#6b7280", marginLeft: 3 }}>
+                          <span style={{ color: T.accent, fontWeight: 600 }}>${fmt(calc.availCalc.depositLiq)}</span>
+                          <span style={{ color: T.textMuted, marginLeft: 3 }}>
                             (여유 {fmt(Math.abs(calc.liqDistPct), 1)}% → {fmt(Math.abs(calc.availCalc.depositLiqDist), 1)}%)
                           </span>
                         </div>
@@ -3230,18 +3592,18 @@ export default function SimV4() {
               <div style={S.liqBar}>
                 <div style={S.liqBarInner}>
                   <div>
-                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>
-                      강제 청산가 <span style={{ color: "#4b5563" }}>({calc.calcRefCoin})</span>
+                    <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>
+                      강제 청산가 <span style={{ color: T.textDim }}>({calc.calcRefCoin})</span>
                     </div>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: "#f59e0b", fontFamily: "'DM Sans'" }}>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: T.warning, fontFamily: "'DM Sans'" }}>
                       ${fmt(calc.exLiq)}
                     </div>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>현재가 대비 여유</div>
+                    <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>현재가 대비 여유</div>
                     <div style={{
                       fontSize: 20, fontWeight: 700, fontFamily: "'DM Sans'",
-                      color: Math.abs(calc.liqDistPct || 0) > 50 ? "#34d399" : Math.abs(calc.liqDistPct || 0) > 20 ? "#f59e0b" : "#f87171",
+                      color: Math.abs(calc.liqDistPct || 0) > 50 ? T.accent : Math.abs(calc.liqDistPct || 0) > 20 ? T.warning : T.danger,
                     }}>
                       {calc.liqDistPct != null ? `${fmt(Math.abs(calc.liqDistPct))}%` : "—"}
                     </div>
@@ -3249,23 +3611,23 @@ export default function SimV4() {
                 </div>
                 {/* 다중 코인 자동계산 청산가 */}
                 {Object.keys(calc.autoLiqPrices).length > 0 && (
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #1e1e2e" }}>
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${T.border}` }}>
                     {Object.entries(calc.autoLiqPrices).map(([coin, liq]) => {
                       const coinCp = getCp(coin);
                       const dist = coinCp > 0 ? ((coinCp - liq) / coinCp) * 100 : null;
                       return (
                         <div key={coin} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", fontFamily: "'IBM Plex Mono'", width: 40 }}>{coin}</span>
-                            <span style={{ fontSize: 14, fontWeight: 600, color: "#f59e0b", fontFamily: "'DM Sans'" }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: T.textSub, fontFamily: "'IBM Plex Mono'", width: 40 }}>{coin}</span>
+                            <span style={{ fontSize: 14, fontWeight: 600, color: T.warning, fontFamily: "'DM Sans'" }}>
                               ${fmt(liq, liq > 100 ? 2 : 4)}
                             </span>
-                            <span style={{ fontSize: 9, color: "#0ea5e966", fontFamily: "'DM Sans'" }}>자동</span>
+                            <span style={{ fontSize: 9, color: `${T.accentBlue}66`, fontFamily: "'DM Sans'" }}>자동</span>
                           </div>
                           {dist != null && (
                             <span style={{
                               fontSize: 11, fontWeight: 600, fontFamily: "'DM Sans'",
-                              color: Math.abs(dist) > 50 ? "#34d399" : Math.abs(dist) > 20 ? "#f59e0b" : "#f87171",
+                              color: Math.abs(dist) > 50 ? T.accent : Math.abs(dist) > 20 ? T.warning : T.danger,
                             }}>
                               여유 {fmt(Math.abs(dist))}%
                             </span>
@@ -3282,13 +3644,38 @@ export default function SimV4() {
                       <div style={{
                         ...S.liqFill,
                         width: `${Math.min(Math.abs(calc.liqDistPct), 100)}%`,
-                        background: Math.abs(calc.liqDistPct) > 50 ? "#34d399" : Math.abs(calc.liqDistPct) > 20 ? "#f59e0b" : "#f87171",
+                        background: Math.abs(calc.liqDistPct) > 50 ? T.accent : Math.abs(calc.liqDistPct) > 20 ? T.warning : T.danger,
                       }} />
                     </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#4b5563", marginTop: 3 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: T.textDim, marginTop: 3 }}>
                       <span>청산</span>
                       <span>현재가</span>
                     </div>
+                  </div>
+                )}
+                {/* Coupon recovery line on liqBar */}
+                {couponCalc && couponCalc.distance != null && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ height: 6, background: T.border, borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{
+                        height: "100%", borderRadius: 3, transition: "width 0.3s",
+                        background: T.warning,
+                        width: `${Math.min(Math.abs(couponCalc.distance), 100)}%`,
+                      }} />
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3, fontSize: 9 }}>
+                      <span style={{ color: T.warning }}>쿠폰 회수 {fmt(n(couponRecoveryPrice), 2)}</span>
+                      <span style={{ color: T.textDim }}>거리 {fmt(Math.abs(couponCalc.distance), 2)}%</span>
+                    </div>
+                    {couponCalc.recoveryCloser && (
+                      <div style={{
+                        marginTop: 6, padding: "6px 10px", borderRadius: 6,
+                        background: `${T.warning}10`, border: `1px solid ${T.warning}33`,
+                        fontSize: 10, color: T.warning, lineHeight: 1.5,
+                      }}>
+                        쿠폰 회수가가 강청가보다 가까움 — 회수 시 전체 포지션 시장가 청산
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -3303,33 +3690,33 @@ export default function SimV4() {
             {pyraMode && calc.pyraResult && calc.cp > 0 && (
               <div style={{
                 marginTop: 10, padding: 16, borderRadius: 10,
-                background: "#0c0a04", border: "1px solid #f59e0b33",
+                background: "#0c0a04", border: `1px solid ${T.warning}33`,
               }}>
-                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: "#f59e0b", fontFamily: "'DM Sans'", marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: T.warning, fontFamily: "'DM Sans'", marginBottom: 10 }}>
                   🔥 동시 청산 시
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                   <div>
-                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>합산 PnL</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: calc.pyraResult.combinedPnL >= 0 ? "#34d399" : "#f87171", fontFamily: "'IBM Plex Mono'" }}>
+                    <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>합산 PnL</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: calc.pyraResult.combinedPnL >= 0 ? T.accent : T.danger, fontFamily: "'IBM Plex Mono'" }}>
                       {fmtS(calc.pyraResult.combinedPnL)}
                     </div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>순손익 (수수료 후)</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: calc.pyraResult.simultaneousClose >= 0 ? "#34d399" : "#f87171", fontFamily: "'IBM Plex Mono'" }}>
+                    <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>순손익 (수수료 후)</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: calc.pyraResult.simultaneousClose >= 0 ? T.accent : T.danger, fontFamily: "'IBM Plex Mono'" }}>
                       {fmtS(calc.pyraResult.simultaneousClose)}
                     </div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>역전가까지</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", fontFamily: "'IBM Plex Mono'" }}>
+                    <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>역전가까지</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: T.warning, fontFamily: "'IBM Plex Mono'" }}>
                       {calc.pyraResult.reversalPrice
                         ? `${fmtS(calc.pyraResult.reversalDist)}%`
                         : "—"}
                     </div>
                     {calc.pyraResult.reversalPrice && (
-                      <div style={{ fontSize: 10, color: "#6b7280" }}>${fmt(calc.pyraResult.reversalPrice)}</div>
+                      <div style={{ fontSize: 10, color: T.textMuted }}>${fmt(calc.pyraResult.reversalPrice)}</div>
                     )}
                   </div>
                 </div>
@@ -3352,49 +3739,49 @@ export default function SimV4() {
                 {/* Position summary + close ratios */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
                   {/* Long */}
-                  <div style={{ padding: 12, borderRadius: 10, background: "#08080f", border: "1px solid #34d39933" }}>
-                    <div style={{ fontSize: 10, color: "#34d399", fontWeight: 700, marginBottom: 6, fontFamily: "'DM Sans'" }}>롱</div>
-                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 2 }}>진입 <span style={{ color: "#e2e8f0", fontWeight: 600 }}>${fmt(pair.long.ep, pair.long.ep > 100 ? 2 : 4)}</span></div>
-                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 2 }}>마진 <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{fmt(pair.long.mg)}</span> · {pair.long.lev}x</div>
-                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>수량 <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{fmt(pair.long.qty, 4)}</span></div>
-                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 3 }}>청산 비율 (%)</div>
+                  <div style={{ padding: 12, borderRadius: 10, background: T.bgCard, border: `1px solid ${T.accent}33` }}>
+                    <div style={{ fontSize: 10, color: T.accent, fontWeight: 700, marginBottom: 6, fontFamily: "'DM Sans'" }}>롱</div>
+                    <div style={{ fontSize: 12, color: T.textSub, marginBottom: 2 }}>진입 <span style={{ color: T.textMid, fontWeight: 600 }}>${fmt(pair.long.ep, pair.long.ep > 100 ? 2 : 4)}</span></div>
+                    <div style={{ fontSize: 12, color: T.textSub, marginBottom: 2 }}>마진 <span style={{ color: T.textMid, fontWeight: 600 }}>{fmt(pair.long.mg)}</span> · {pair.long.lev}x</div>
+                    <div style={{ fontSize: 12, color: T.textSub, marginBottom: 6 }}>수량 <span style={{ color: T.textMid, fontWeight: 600 }}>{fmt(pair.long.qty, 4)}</span></div>
+                    <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 3 }}>청산 비율 (%)</div>
                     <input type="number" value={getScRatio(pair.coin, "long")}
                       onChange={(e) => setScRatio(pair.coin, "long", e.target.value)}
                       style={{ ...S.inp, fontSize: 13, padding: "8px 10px" }}
                       onFocus={(e) => (e.target.style.borderColor = "#10b981")}
-                      onBlur={(e) => (e.target.style.borderColor = "#1e1e2e")} />
+                      onBlur={(e) => (e.target.style.borderColor = T.border)} />
                     <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
                       {[25, 50, 75, 100].map(v => (
                         <button key={v} onClick={() => setScRatio(pair.coin, "long", String(v))} style={{
                           flex: 1, padding: "3px 0", fontSize: 9, fontWeight: 600, borderRadius: 4,
                           cursor: "pointer", fontFamily: "'DM Sans'", transition: "all 0.12s",
-                          border: `1px solid ${getScRatio(pair.coin, "long") === String(v) ? "#10b98166" : "#1e1e2e"}`,
+                          border: `1px solid ${getScRatio(pair.coin, "long") === String(v) ? "#10b98166" : T.border}`,
                           background: getScRatio(pair.coin, "long") === String(v) ? "#10b98115" : "transparent",
-                          color: getScRatio(pair.coin, "long") === String(v) ? "#10b981" : "#4b5563",
+                          color: getScRatio(pair.coin, "long") === String(v) ? "#10b981" : T.textDim,
                         }}>{v}%</button>
                       ))}
                     </div>
                   </div>
                   {/* Short */}
-                  <div style={{ padding: 12, borderRadius: 10, background: "#08080f", border: "1px solid #f8717133" }}>
-                    <div style={{ fontSize: 10, color: "#f87171", fontWeight: 700, marginBottom: 6, fontFamily: "'DM Sans'" }}>숏</div>
-                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 2 }}>진입 <span style={{ color: "#e2e8f0", fontWeight: 600 }}>${fmt(pair.short.ep, pair.short.ep > 100 ? 2 : 4)}</span></div>
-                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 2 }}>마진 <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{fmt(pair.short.mg)}</span> · {pair.short.lev}x</div>
-                    <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>수량 <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{fmt(pair.short.qty, 4)}</span></div>
-                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 3 }}>청산 비율 (%)</div>
+                  <div style={{ padding: 12, borderRadius: 10, background: T.bgCard, border: `1px solid ${T.danger}33` }}>
+                    <div style={{ fontSize: 10, color: T.danger, fontWeight: 700, marginBottom: 6, fontFamily: "'DM Sans'" }}>숏</div>
+                    <div style={{ fontSize: 12, color: T.textSub, marginBottom: 2 }}>진입 <span style={{ color: T.textMid, fontWeight: 600 }}>${fmt(pair.short.ep, pair.short.ep > 100 ? 2 : 4)}</span></div>
+                    <div style={{ fontSize: 12, color: T.textSub, marginBottom: 2 }}>마진 <span style={{ color: T.textMid, fontWeight: 600 }}>{fmt(pair.short.mg)}</span> · {pair.short.lev}x</div>
+                    <div style={{ fontSize: 12, color: T.textSub, marginBottom: 6 }}>수량 <span style={{ color: T.textMid, fontWeight: 600 }}>{fmt(pair.short.qty, 4)}</span></div>
+                    <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 3 }}>청산 비율 (%)</div>
                     <input type="number" value={getScRatio(pair.coin, "short")}
                       onChange={(e) => setScRatio(pair.coin, "short", e.target.value)}
                       style={{ ...S.inp, fontSize: 13, padding: "8px 10px" }}
                       onFocus={(e) => (e.target.style.borderColor = "#10b981")}
-                      onBlur={(e) => (e.target.style.borderColor = "#1e1e2e")} />
+                      onBlur={(e) => (e.target.style.borderColor = T.border)} />
                     <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
                       {[25, 50, 75, 100].map(v => (
                         <button key={v} onClick={() => setScRatio(pair.coin, "short", String(v))} style={{
                           flex: 1, padding: "3px 0", fontSize: 9, fontWeight: 600, borderRadius: 4,
                           cursor: "pointer", fontFamily: "'DM Sans'", transition: "all 0.12s",
-                          border: `1px solid ${getScRatio(pair.coin, "short") === String(v) ? "#10b98166" : "#1e1e2e"}`,
+                          border: `1px solid ${getScRatio(pair.coin, "short") === String(v) ? "#10b98166" : T.border}`,
                           background: getScRatio(pair.coin, "short") === String(v) ? "#10b98115" : "transparent",
-                          color: getScRatio(pair.coin, "short") === String(v) ? "#10b981" : "#4b5563",
+                          color: getScRatio(pair.coin, "short") === String(v) ? "#10b981" : T.textDim,
                         }}>{v}%</button>
                       ))}
                     </div>
@@ -3404,31 +3791,31 @@ export default function SimV4() {
                 {/* Fee details */}
                 <div style={S.detBox}>
                   <div style={{ ...S.detTitle, color: "#10b981" }}>수수료 내역</div>
-                  <div style={S.sl}><span style={{ color: "#6b7280" }}>진입 수수료 (이미 지불)</span><span style={{ color: "#f59e0b" }}>{fmt(pair.entryFees)} USDT</span></div>
-                  <div style={S.sl}><span style={{ color: "#6b7280" }}>청산 수수료 (현재가 기준)</span><span style={{ color: "#f59e0b" }}>{fmt(pair.currentCloseFee)} USDT</span></div>
-                  <div style={{ ...S.sl, borderBottom: "none", fontWeight: 600 }}><span style={{ color: "#94a3b8" }}>수수료 합계</span><span style={{ color: "#f59e0b" }}>{fmt(pair.entryFees + pair.currentCloseFee)} USDT</span></div>
+                  <div style={S.sl}><span style={{ color: T.textMuted }}>진입 수수료 (이미 지불)</span><span style={{ color: T.warning }}>{fmt(pair.entryFees)} USDT</span></div>
+                  <div style={S.sl}><span style={{ color: T.textMuted }}>청산 수수료 (현재가 기준)</span><span style={{ color: T.warning }}>{fmt(pair.currentCloseFee)} USDT</span></div>
+                  <div style={{ ...S.sl, borderBottom: "none", fontWeight: 600 }}><span style={{ color: T.textSub }}>수수료 합계</span><span style={{ color: T.warning }}>{fmt(pair.entryFees + pair.currentCloseFee)} USDT</span></div>
                 </div>
 
                 {/* Break-even prices */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
                   <div style={{ padding: 14, borderRadius: 10, background: "#10b98108", border: "1px solid #10b98133", textAlign: "center" }}>
-                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>본전가 (전체 수수료)</div>
+                    <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 4 }}>본전가 (전체 수수료)</div>
                     <div style={{ fontSize: 18, fontWeight: 700, color: "#10b981", fontFamily: "'DM Sans'" }}>
                       {pair.breakevenAll ? `$${fmt(pair.breakevenAll, pair.breakevenAll > 100 ? 2 : 4)}` : "—"}
                     </div>
                     {pair.beAllDist != null && (
-                      <div style={{ fontSize: 11, color: pair.beAllDist >= 0 ? "#34d399" : "#f87171", marginTop: 2 }}>
+                      <div style={{ fontSize: 11, color: pair.beAllDist >= 0 ? T.accent : T.danger, marginTop: 2 }}>
                         현재가 대비 {fmtS(pair.beAllDist)}%
                       </div>
                     )}
                   </div>
-                  <div style={{ padding: 14, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e", textAlign: "center" }}>
-                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>본전가 (청산 수수료만)</div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: "#94a3b8", fontFamily: "'DM Sans'" }}>
+                  <div style={{ padding: 14, borderRadius: 10, background: T.bgCard, border: `1px solid ${T.border}`, textAlign: "center" }}>
+                    <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 4 }}>본전가 (청산 수수료만)</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: T.textSub, fontFamily: "'DM Sans'" }}>
                       {pair.breakevenClose ? `$${fmt(pair.breakevenClose, pair.breakevenClose > 100 ? 2 : 4)}` : "—"}
                     </div>
                     {pair.beCloseDist != null && (
-                      <div style={{ fontSize: 11, color: pair.beCloseDist >= 0 ? "#34d399" : "#f87171", marginTop: 2 }}>
+                      <div style={{ fontSize: 11, color: pair.beCloseDist >= 0 ? T.accent : T.danger, marginTop: 2 }}>
                         현재가 대비 {fmtS(pair.beCloseDist)}%
                       </div>
                     )}
@@ -3436,32 +3823,32 @@ export default function SimV4() {
                 </div>
 
                 {/* Current price summary */}
-                <div style={{ padding: 14, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e", marginBottom: 10 }}>
-                  <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, fontFamily: "'DM Sans'" }}>
+                <div style={{ padding: 14, borderRadius: 10, background: T.bgCard, border: `1px solid ${T.border}`, marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 6, fontFamily: "'DM Sans'" }}>
                     현재가 ${fmt(pair.coinCp, pair.coinCp > 100 ? 2 : 4)} 에서 동시 청산 시
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
                     <div>
-                      <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 2 }}>롱 PnL</div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: pair.currentLongPnL >= 0 ? "#34d399" : "#f87171", fontFamily: "'IBM Plex Mono'" }}>
+                      <div style={{ fontSize: 9, color: T.textMuted, marginBottom: 2 }}>롱 PnL</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: pair.currentLongPnL >= 0 ? T.accent : T.danger, fontFamily: "'IBM Plex Mono'" }}>
                         {fmtS(pair.currentLongPnL)}
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 2 }}>숏 PnL</div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: pair.currentShortPnL >= 0 ? "#34d399" : "#f87171", fontFamily: "'IBM Plex Mono'" }}>
+                      <div style={{ fontSize: 9, color: T.textMuted, marginBottom: 2 }}>숏 PnL</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: pair.currentShortPnL >= 0 ? T.accent : T.danger, fontFamily: "'IBM Plex Mono'" }}>
                         {fmtS(pair.currentShortPnL)}
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 2 }}>수수료</div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: "#f59e0b", fontFamily: "'IBM Plex Mono'" }}>
+                      <div style={{ fontSize: 9, color: T.textMuted, marginBottom: 2 }}>수수료</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: T.warning, fontFamily: "'IBM Plex Mono'" }}>
                         -{fmt(pair.entryFees + pair.currentCloseFee)}
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 2 }}>순손익</div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: pair.currentNetAll >= 0 ? "#34d399" : "#f87171", fontFamily: "'IBM Plex Mono'" }}>
+                      <div style={{ fontSize: 9, color: T.textMuted, marginBottom: 2 }}>순손익</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: pair.currentNetAll >= 0 ? T.accent : T.danger, fontFamily: "'IBM Plex Mono'" }}>
                         {fmtS(pair.currentNetAll)}
                       </div>
                     </div>
@@ -3469,33 +3856,33 @@ export default function SimV4() {
                 </div>
 
                 {/* Target profit */}
-                <div style={{ padding: 14, borderRadius: 10, background: "#08080f", border: "1px solid #10b98122", marginBottom: 10 }}>
+                <div style={{ padding: 14, borderRadius: 10, background: T.bgCard, border: "1px solid #10b98122", marginBottom: 10 }}>
                   <div style={{ fontSize: 10, color: "#10b981", fontWeight: 700, letterSpacing: 2, marginBottom: 8, fontFamily: "'DM Sans'" }}>목표 익절</div>
                   <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>목표 금액 (USDT)</div>
+                      <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 4 }}>목표 금액 (USDT)</div>
                       <input type="number" value={getScTarget(pair.coin)}
                         onChange={(e) => setScTarget(pair.coin, e.target.value)}
                         placeholder="0"
                         style={{ ...S.inp, fontSize: 13, padding: "8px 10px" }}
                         onFocus={(e) => (e.target.style.borderColor = "#10b981")}
-                        onBlur={(e) => (e.target.style.borderColor = "#1e1e2e")} />
+                        onBlur={(e) => (e.target.style.borderColor = T.border)} />
                     </div>
                     <div style={{ flex: 1, paddingLeft: 4, display: "flex", alignItems: "flex-end" }}>
                       {pair.targetPrice ? (
                         <div style={{ paddingBottom: 2 }}>
-                          <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>익절가</div>
+                          <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>익절가</div>
                           <div style={{ fontSize: 18, fontWeight: 700, color: "#10b981", fontFamily: "'DM Sans'" }}>
                             ${fmt(pair.targetPrice, pair.targetPrice > 100 ? 2 : 4)}
                           </div>
-                          <div style={{ fontSize: 11, color: pair.targetDist >= 0 ? "#34d399" : "#f87171", marginTop: 1 }}>
+                          <div style={{ fontSize: 11, color: pair.targetDist >= 0 ? T.accent : T.danger, marginTop: 1 }}>
                             현재가 대비 {fmtS(pair.targetDist)}%
                           </div>
                         </div>
                       ) : pair.target > 0 ? (
-                        <div style={{ fontSize: 11, color: "#f87171", paddingBottom: 10 }}>도달 불가</div>
+                        <div style={{ fontSize: 11, color: T.danger, paddingBottom: 10 }}>도달 불가</div>
                       ) : (
-                        <div style={{ fontSize: 11, color: "#333", paddingBottom: 10 }}>금액 입력 시 익절가 표시</div>
+                        <div style={{ fontSize: 11, color: T.textEmpty, paddingBottom: 10 }}>금액 입력 시 익절가 표시</div>
                       )}
                     </div>
                   </div>
@@ -3516,26 +3903,26 @@ export default function SimV4() {
                     <tbody>
                       {pair.scenarios.map((s, i) => (
                         <tr key={i} style={{
-                          background: s.isSpecial ? "#10b98108" : s.isCurrent ? "#0ea5e908" : "transparent",
+                          background: s.isSpecial ? "#10b98108" : s.isCurrent ? `${T.accentBlue}08` : "transparent",
                         }}>
                           <td style={{ ...S.td, fontWeight: s.isSpecial || s.isCurrent ? 600 : 400 }}>
-                            <div style={{ fontSize: 12, color: s.isSpecial ? "#10b981" : s.isCurrent ? "#0ea5e9" : "#e2e8f0" }}>
+                            <div style={{ fontSize: 12, color: s.isSpecial ? "#10b981" : s.isCurrent ? T.accentBlue : T.textMid }}>
                               ${fmt(s.price, s.price > 100 ? 2 : 4)}
                             </div>
-                            <div style={{ fontSize: 9, color: s.isSpecial ? "#10b981" : s.isCurrent ? "#0ea5e9" : "#4b5563" }}>
+                            <div style={{ fontSize: 9, color: s.isSpecial ? "#10b981" : s.isCurrent ? T.accentBlue : T.textDim }}>
                               {s.label}
                             </div>
                           </td>
-                          <td style={{ ...S.td, textAlign: "right", color: s.longPnL >= 0 ? "#34d399" : "#f87171" }}>
+                          <td style={{ ...S.td, textAlign: "right", color: s.longPnL >= 0 ? T.accent : T.danger }}>
                             {fmtS(s.longPnL)}
                           </td>
-                          <td style={{ ...S.td, textAlign: "right", color: s.shortPnL >= 0 ? "#34d399" : "#f87171" }}>
+                          <td style={{ ...S.td, textAlign: "right", color: s.shortPnL >= 0 ? T.accent : T.danger }}>
                             {fmtS(s.shortPnL)}
                           </td>
-                          <td style={{ ...S.td, textAlign: "right", color: "#f59e0b" }}>
+                          <td style={{ ...S.td, textAlign: "right", color: T.warning }}>
                             -{fmt(s.closeFee + pair.entryFees)}
                           </td>
-                          <td style={{ ...S.td, textAlign: "right", fontWeight: 600, color: s.netAll >= 0 ? "#34d399" : "#f87171" }}>
+                          <td style={{ ...S.td, textAlign: "right", fontWeight: 600, color: s.netAll >= 0 ? T.accent : T.danger }}>
                             {fmtS(s.netAll)}
                           </td>
                         </tr>
@@ -3557,13 +3944,13 @@ export default function SimV4() {
               {[["sim", "추가 진입"], ["reverse", "목표 평단"], ["close", "부분 청산"]].map(([k, lb]) => (
                 <button key={k} onClick={() => setDcaMode(k)} style={{
                   ...S.modeBtn,
-                  background: dcaMode === k ? (k === "close" ? "#f8717115" : "#0ea5e915") : "transparent",
-                  borderColor: dcaMode === k ? (k === "close" ? "#f8717144" : "#0ea5e944") : "#1e1e2e",
-                  color: dcaMode === k ? (k === "close" ? "#f87171" : "#0ea5e9") : "#6b7280",
+                  background: dcaMode === k ? (k === "close" ? `${T.danger}15` : `${T.accentBlue}15`) : "transparent",
+                  borderColor: dcaMode === k ? (k === "close" ? `${T.danger}44` : `${T.accentBlue}44`) : T.border,
+                  color: dcaMode === k ? (k === "close" ? T.danger : T.accentBlue) : T.textMuted,
                 }}>{lb}</button>
               ))}
             </div>
-            <div style={{ fontSize: 10, color: "#4b5563", marginBottom: 10, fontFamily: "'DM Sans'" }}>
+            <div style={{ fontSize: 10, color: T.textDim, marginBottom: 10, fontFamily: "'DM Sans'" }}>
               {dcaMode === "sim" && "지정 가격에 추가 매수하면 평단·청산가·ROE가 어떻게 바뀌는지 미리 확인"}
               {dcaMode === "reverse" && "원하는 평단가를 입력하면 필요한 마진/가격을 역으로 계산"}
               {dcaMode === "close" && "지정 비율만큼 포지션을 줄였을 때의 손익과 잔여 포지션 확인"}
@@ -3603,7 +3990,7 @@ export default function SimV4() {
                     </Fld>
 
                     <div style={{ marginTop: 10 }}>
-                      <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, fontFamily: "'DM Sans'" }}>물타기 가격</div>
+                      <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4, fontFamily: "'DM Sans'" }}>물타기 가격</div>
                       {splitPrices.map((sp, idx) => (
                         <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
                           <div style={{ ...S.dcaNum, width: 20, height: 20, fontSize: 10 }}>{idx + 1}</div>
@@ -3637,38 +4024,38 @@ export default function SimV4() {
                             return (
                               <div key={i} style={{
                                 ...S.splitCard,
-                                borderColor: isBest ? "#0ea5e944" : "#1e1e2e",
-                                background: isBest ? "#0a1020" : "#0a0a14",
+                                borderColor: isBest ? `${T.accentBlue}44` : T.border,
+                                background: isBest ? "#0a1020" : T.bgInput2,
                               }}>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                                  <div style={{ fontSize: 12, fontWeight: 600, color: isBest ? "#0ea5e9" : "#94a3b8", fontFamily: "'DM Sans'" }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: isBest ? T.accentBlue : T.textSub, fontFamily: "'DM Sans'" }}>
                                     {isBest ? "✦ " : ""}{sr.name}
                                   </div>
-                                  <div style={{ fontSize: 9, color: "#4b5563" }}>{sr.desc}</div>
+                                  <div style={{ fontSize: 9, color: T.textDim }}>{sr.desc}</div>
                                 </div>
 
                                 <div style={{ marginBottom: 8 }}>
                                   {sr.entries.map((e, j) => (
-                                    <div key={j} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#6b7280", padding: "2px 0" }}>
+                                    <div key={j} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: T.textMuted, padding: "2px 0" }}>
                                       <span>${fmt(e.price, 0)}</span>
                                       <span>{fmt(e.margin, 0)} USDT</span>
                                     </div>
                                   ))}
                                 </div>
 
-                                <div style={{ borderTop: "1px solid #1e1e2e", paddingTop: 8, marginBottom: 8 }}>
+                                <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 8, marginBottom: 8 }}>
                                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
-                                    <span style={{ color: "#6b7280" }}>새 평단</span>
-                                    <span style={{ color: isBest ? "#0ea5e9" : "#e2e8f0", fontWeight: 600 }}>${fmt(sr.newAvg)}</span>
+                                    <span style={{ color: T.textMuted }}>새 평단</span>
+                                    <span style={{ color: isBest ? T.accentBlue : T.textMid, fontWeight: 600 }}>${fmt(sr.newAvg)}</span>
                                   </div>
                                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
-                                    <span style={{ color: "#6b7280" }}>탈출가</span>
-                                    <span style={{ color: "#f59e0b" }}>${fmt(sr.breakeven)}</span>
+                                    <span style={{ color: T.textMuted }}>탈출가</span>
+                                    <span style={{ color: T.warning }}>${fmt(sr.breakeven)}</span>
                                   </div>
                                   {calc?.exLiq > 0 && sr.afterLiq != null && (
                                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-                                      <span style={{ color: "#6b7280" }}>청산가</span>
-                                      <span style={{ color: "#e2e8f0" }}>${fmt(sr.afterLiq)}</span>
+                                      <span style={{ color: T.textMuted }}>청산가</span>
+                                      <span style={{ color: T.textMid }}>${fmt(sr.afterLiq)}</span>
                                     </div>
                                   )}
                                 </div>
@@ -3683,14 +4070,14 @@ export default function SimV4() {
                                 }} style={{
                                   ...S.applyBtn,
                                   width: "100%", padding: "6px 0", textAlign: "center",
-                                  background: isBest ? "#0ea5e918" : "#0ea5e908",
+                                  background: isBest ? `${T.accentBlue}18` : `${T.accentBlue}08`,
                                 }}>채우기</button>
                               </div>
                             );
                           })}
                         </div>
 
-                        <div style={{ fontSize: 10, color: "#4b5563", marginTop: 6 }}>
+                        <div style={{ fontSize: 10, color: T.textDim, marginTop: 6 }}>
                           ✦ 추천: {calc.splitResult.results[calc.splitResult.bestIdx].name} — 평단이 가장 {calc.sel?.dir === "long" ? "낮아짐" : "높아짐"}
                         </div>
                       </>
@@ -3715,14 +4102,14 @@ export default function SimV4() {
             {dcaMode === "close" && (
               <>
                 <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6, fontFamily: "'DM Sans'" }}>손절 비율</div>
+                  <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 6, fontFamily: "'DM Sans'" }}>손절 비율</div>
                   <div style={{ display: "flex", gap: 4 }}>
                     {[25, 50, 75, 100].map((v) => (
                       <button key={v} onClick={() => setCloseRatio(String(v))} style={{
                         flex: 1, padding: "9px 0", fontSize: 12, fontWeight: 600, borderRadius: 6, cursor: "pointer",
-                        border: `1px solid ${n(closeRatio) === v ? "#f8717133" : "#1e1e2e"}`,
-                        background: n(closeRatio) === v ? "#f8717112" : "transparent",
-                        color: n(closeRatio) === v ? "#f87171" : "#4b5563",
+                        border: `1px solid ${n(closeRatio) === v ? `${T.danger}33` : T.border}`,
+                        background: n(closeRatio) === v ? `${T.danger}12` : "transparent",
+                        color: n(closeRatio) === v ? T.danger : T.textDim,
                         fontFamily: "'DM Sans'",
                       }}>{v}%</button>
                     ))}
@@ -3764,11 +4151,11 @@ export default function SimV4() {
                 const candidates = positions.filter((p) => p.id !== pyraCounterId && p.dir === lockedDirEn && p.coin === (counterPos?.coin || ""));
                 if (candidates.length > 1) return (
                   <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>물린 포지션 선택:</div>
+                    <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 6 }}>물린 포지션 선택:</div>
                     {candidates.map((c) => (
                       <button key={c.id} onClick={() => setPyraLockedId(c.id)} style={{
                         ...S.miniBtn, marginRight: 6, marginBottom: 4,
-                        color: "#6b7280", borderColor: "#6b728044",
+                        color: T.textMuted, borderColor: `${T.textMuted}44`,
                       }}>
                         {c.dir === "long" ? "롱" : "숏"} ${c.entryPrice} · {c.margin} USDT
                       </button>
@@ -3776,7 +4163,7 @@ export default function SimV4() {
                   </div>
                 );
                 if (candidates.length === 0) return (
-                  <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12, padding: 10, borderRadius: 8, background: "#0a0a12", border: "1px dashed #1e1e2e" }}>
+                  <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 12, padding: 10, borderRadius: 8, background: T.bgInput, border: `1px dashed ${T.border}` }}>
                     반대 방향({lockedDirKr}) 포지션이 없습니다. 포지션을 추가하거나 불타기 진입만 시뮬레이션합니다.
                   </div>
                 );
@@ -3785,11 +4172,11 @@ export default function SimV4() {
 
               {/* Show locked (losing) position info */}
               {locked && (
-                <div style={{ padding: 10, borderRadius: 8, background: "#0a0a12", border: "1px solid #1e1e2e", marginBottom: 12, fontSize: 12 }}>
-                  <div style={{ color: "#6b7280", fontSize: 10, marginBottom: 4 }}>🔒 물린 포지션 (고정)</div>
-                  <span style={{ color: "#94a3b8" }}>
+                <div style={{ padding: 10, borderRadius: 8, background: T.bgInput, border: `1px solid ${T.border}`, marginBottom: 12, fontSize: 12 }}>
+                  <div style={{ color: T.textMuted, fontSize: 10, marginBottom: 4 }}>🔒 물린 포지션 (고정)</div>
+                  <span style={{ color: T.textSub }}>
                     {lockedDirKr} · 균일가 ${fmt(locked.ep)} · 마진 {fmt(locked.mg)} · PnL{" "}
-                    <span style={{ color: locked.pnl >= 0 ? "#34d399" : "#f87171" }}>
+                    <span style={{ color: locked.pnl >= 0 ? T.accent : T.danger }}>
                       {fmtS(locked.pnl)} ({fmtS(locked.roe)}%)
                     </span>
                   </span>
@@ -3801,9 +4188,9 @@ export default function SimV4() {
                 {[["sim", "추가 진입"], ["reverse", "목표 역전가"]].map(([k, lb]) => (
                   <button key={k} onClick={() => setPyraSubMode(k)} style={{
                     ...S.modeBtn,
-                    background: pyraSubMode === k ? "#f59e0b15" : "transparent",
-                    borderColor: pyraSubMode === k ? "#f59e0b44" : "#1e1e2e",
-                    color: pyraSubMode === k ? "#f59e0b" : "#6b7280",
+                    background: pyraSubMode === k ? `${T.warning}15` : "transparent",
+                    borderColor: pyraSubMode === k ? `${T.warning}44` : T.border,
+                    color: pyraSubMode === k ? T.warning : T.textMuted,
                   }}>{lb}</button>
                 ))}
               </div>
@@ -3813,53 +4200,53 @@ export default function SimV4() {
                   {/* Direct input */}
                   {pyraEntries.map((entry, idx) => (
                     <div key={entry.id} style={S.dcaRow}>
-                      <div style={{ ...S.dcaNum, background: "#f59e0b15", borderColor: "#f59e0b33", color: "#f59e0b" }}>
+                      <div style={{ ...S.dcaNum, background: `${T.warning}15`, borderColor: `${T.warning}33`, color: T.warning }}>
                         {calc.pyraCounter ? idx + 1 : idx === 0 ? "①" : idx}
                       </div>
                       <div style={{ flex: 1 }}>
                         <PriceInp value={entry.price} onChange={(v) => updPyra(entry.id, "price", v)} ph={`${counterDirKr} 진입가 ($)`}
                           cp={counterPos ? getCp(counterPos.coin) : 0}
-                          mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor="#f59e0b" />
+                          mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor=T.warning />
                       </div>
                       <div style={{ flex: 1 }}>
                         <Inp value={entry.margin} onChange={(v) => updPyra(entry.id, "margin", v)} ph="투입금액 (USDT)" />
-                        {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={(v) => updPyra(entry.id, "margin", v)} accentColor="#f59e0b" />}
+                        {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={(v) => updPyra(entry.id, "margin", v)} accentColor=T.warning />}
                       </div>
                       {pyraEntries.length > 1 && (
                         <button onClick={() => rmPyra(entry.id)} style={S.rmSm}>×</button>
                       )}
                     </div>
                   ))}
-                  <button onClick={addPyra} style={{ ...S.addBtn, borderColor: "#f59e0b33", color: "#f59e0b66" }}>+ 불타기 추가</button>
+                  <button onClick={addPyra} style={{ ...S.addBtn, borderColor: `${T.warning}33`, color: `${T.warning}66` }}>+ 불타기 추가</button>
 
                   {/* Split helper */}
-                  <button onClick={openPyraSplitHelper} style={{ ...S.splitToggle, borderColor: "#f59e0b33", color: "#f59e0b66" }}>
+                  <button onClick={openPyraSplitHelper} style={{ ...S.splitToggle, borderColor: `${T.warning}33`, color: `${T.warning}66` }}>
                     {pyraSplitMode ? "분할 매수 전략 접기 ▲" : "분할 매수 전략 ▼"}
                   </button>
 
                   {pyraSplitMode && (
-                    <div style={{ ...S.splitPanel, borderColor: "#f59e0b22" }}>
+                    <div style={{ ...S.splitPanel, borderColor: `${T.warning}22` }}>
                       <Fld label="총 투입금액 (USDT)">
                         <Inp value={pyraSplitTotal} onChange={setPyraSplitTotal} ph="300" />
-                        {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={setPyraSplitTotal} accentColor="#f59e0b" />}
+                        {calc && <MarginPresets freeMargin={calc.freeMargin} onSelect={setPyraSplitTotal} accentColor=T.warning />}
                       </Fld>
                       <div style={{ marginTop: 10 }}>
-                        <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, fontFamily: "'DM Sans'" }}>불타기 가격</div>
+                        <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4, fontFamily: "'DM Sans'" }}>불타기 가격</div>
                         {pyraSplitPrices.map((sp, idx) => (
                           <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
-                            <div style={{ ...S.dcaNum, width: 20, height: 20, fontSize: 10, background: "#f59e0b15", borderColor: "#f59e0b33", color: "#f59e0b" }}>{idx + 1}</div>
+                            <div style={{ ...S.dcaNum, width: 20, height: 20, fontSize: 10, background: `${T.warning}15`, borderColor: `${T.warning}33`, color: T.warning }}>{idx + 1}</div>
                             <div style={{ flex: 1 }}>
                               <PriceInp value={sp} onChange={(v) => updPyraSplitPrice(idx, v)} ph={`가격 ${idx + 1}`}
                                 cp={counterPos ? getCp(counterPos.coin) : 0}
-                                mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor="#f59e0b" />
+                                mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor=T.warning />
                             </div>
                             {pyraSplitPrices.length > 2 && (
                               <button onClick={() => rmPyraSplitPrice(idx)} style={{ ...S.rmSm, width: 28, height: 32, fontSize: 14 }}>×</button>
                             )}
                           </div>
                         ))}
-                        <button onClick={addPyraSplitPrice} style={{ ...S.addBtn, marginTop: 2, fontSize: 11, padding: "6px 0", borderColor: "#f59e0b33", color: "#f59e0b66" }}>+ 가격 추가</button>
-                        <SplitAutoGen cp={counterPos ? getCp(counterPos.coin) : 0} isLong={counter.dir === "long"} onGenerate={setPyraSplitPrices} accentColor="#f59e0b" />
+                        <button onClick={addPyraSplitPrice} style={{ ...S.addBtn, marginTop: 2, fontSize: 11, padding: "6px 0", borderColor: `${T.warning}33`, color: `${T.warning}66` }}>+ 가격 추가</button>
+                        <SplitAutoGen cp={counterPos ? getCp(counterPos.coin) : 0} isLong={counter.dir === "long"} onGenerate={setPyraSplitPrices} accentColor=T.warning />
                       </div>
 
                       {calc?.pyraSplitResult && (
@@ -3874,17 +4261,17 @@ export default function SimV4() {
                             {calc.pyraSplitResult.results.map((sr, i) => (
                               <div key={i} style={{
                                 ...S.splitCard,
-                                borderColor: i === 0 ? "#f59e0b44" : "#1e1e2e",
+                                borderColor: i === 0 ? `${T.warning}44` : T.border,
                               }}>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                                  <div style={{ fontSize: 12, fontWeight: 600, color: i === 0 ? "#f59e0b" : "#94a3b8", fontFamily: "'DM Sans'" }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: i === 0 ? T.warning : T.textSub, fontFamily: "'DM Sans'" }}>
                                     {sr.name}
                                   </div>
-                                  <div style={{ fontSize: 9, color: sr.desc.includes("⚠") ? "#f87171" : "#4b5563" }}>{sr.desc}</div>
+                                  <div style={{ fontSize: 9, color: sr.desc.includes("⚠") ? T.danger : T.textDim }}>{sr.desc}</div>
                                 </div>
                                 <div style={{ marginBottom: 8 }}>
                                   {sr.entries.map((e, j) => (
-                                    <div key={j} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#6b7280", padding: "2px 0" }}>
+                                    <div key={j} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: T.textMuted, padding: "2px 0" }}>
                                       <span>${fmt(e.price, 0)}</span>
                                       <span>{fmt(e.margin, 0)} USDT</span>
                                     </div>
@@ -3900,7 +4287,7 @@ export default function SimV4() {
                                 }} style={{
                                   ...S.applyBtn,
                                   width: "100%", padding: "6px 0", textAlign: "center",
-                                  borderColor: "#f59e0b33", background: "#f59e0b10", color: "#f59e0b",
+                                  borderColor: `${T.warning}33`, background: `${T.warning}10`, color: T.warning,
                                 }}>채우기</button>
                               </div>
                             ))}
@@ -3917,7 +4304,7 @@ export default function SimV4() {
                   <Fld label={`${counterDirKr} 불타기 진입 예정가 ($)`}>
                     <PriceInp value={pyraRevPrice} onChange={setPyraRevPrice} ph="불타기 진입가"
                       cp={counterPos ? getCp(counterPos.coin) : 0}
-                      mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor="#f59e0b" />
+                      mode={counter.dir === "long" ? "pyra-long" : "pyra-short"} accentColor=T.warning />
                   </Fld>
                   <Fld label="목표 역전가 ($)">
                     <Inp value={pyraRevTarget} onChange={setPyraRevTarget} ph="이 가격에서 합산PnL=0" />
@@ -3935,7 +4322,7 @@ export default function SimV4() {
 
           return (
             <>
-              <div style={{ ...S.divider, background: "linear-gradient(90deg, transparent, #f59e0b22, transparent)" }} />
+              <div style={{ ...S.divider, background: `linear-gradient(90deg, transparent, ${T.warning}22, transparent)` }} />
               <Sec label="불타기 시뮬레이션 결과" pyra />
 
               {/* Warnings */}
@@ -3945,25 +4332,25 @@ export default function SimV4() {
 
               {/* 역전가 프로그레스 */}
               {pr.reversalPrice && (
-                <div style={{ ...S.card, borderColor: "#f59e0b33", marginBottom: 12 }}>
+                <div style={{ ...S.card, borderColor: `${T.warning}33`, marginBottom: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <div style={{ fontSize: 10, color: "#f59e0b", letterSpacing: 2, fontFamily: "'DM Sans'" }}>
+                    <div style={{ fontSize: 10, color: T.warning, letterSpacing: 2, fontFamily: "'DM Sans'" }}>
                       본전 회복 가격
                     </div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", fontFamily: "'IBM Plex Mono'" }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: T.warning, fontFamily: "'IBM Plex Mono'" }}>
                       ${fmt(pr.reversalPrice)}
                     </div>
                   </div>
-                  <div style={{ height: 8, background: "#1e1e2e", borderRadius: 4, overflow: "hidden" }}>
+                  <div style={{ height: 8, background: T.border, borderRadius: 4, overflow: "hidden" }}>
                     <div style={{
                       height: "100%", borderRadius: 4, transition: "width 0.3s",
                       width: `${Math.max((pr.reversalProgress || 0) * 100, 0)}%`,
-                      background: (pr.reversalProgress || 0) >= 1 ? "#34d399" : "linear-gradient(90deg, #f59e0b, #34d399)",
+                      background: (pr.reversalProgress || 0) >= 1 ? T.accent : `linear-gradient(90deg, ${T.warning}, ${T.accent})`,
                     }} />
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, marginTop: 4, color: "#4b5563" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, marginTop: 4, color: T.textDim }}>
                     <span>현재가서 {fmtS(pr.reversalDist)}%</span>
-                    <span style={{ color: (pr.reversalProgress || 0) >= 1 ? "#34d399" : "#f59e0b" }}>
+                    <span style={{ color: (pr.reversalProgress || 0) >= 1 ? T.accent : T.warning }}>
                       {(pr.reversalProgress || 0) >= 1 ? "🎉 역전 달성!" : `${fmt((pr.reversalProgress || 0) * 100, 0)}%`}
                     </span>
                   </div>
@@ -3972,24 +4359,24 @@ export default function SimV4() {
 
               {/* 청산 시나리오 비교 */}
               {pr.closeScenarios && (
-                <div style={{ ...S.card, borderColor: "#1e1e2e", marginBottom: 12 }}>
-                  <div style={{ fontSize: 10, color: "#6b7280", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+                <div style={{ ...S.card, borderColor: T.border, marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
                     지금 청산하면?
                   </div>
                   {[pr.closeScenarios.both, pr.closeScenarios.counterOnly, pr.closeScenarios.lockedOnly].map((sc, i) => (
                     <div key={i} style={{
                       display: "flex", justifyContent: "space-between", alignItems: "center",
                       padding: "10px 12px", marginBottom: 4, borderRadius: 8,
-                      background: i === 0 ? (sc.net >= 0 ? "#34d39908" : "#f8717108") : "#0a0a14",
-                      border: `1px solid ${i === 0 ? (sc.net >= 0 ? "#34d39922" : "#f8717122") : "#1e1e2e"}`,
+                      background: i === 0 ? (sc.net >= 0 ? `${T.accent}08` : `${T.danger}08`) : T.bgInput2,
+                      border: `1px solid ${i === 0 ? (sc.net >= 0 ? `${T.accent}22` : `${T.danger}22`) : T.border}`,
                     }}>
                       <div>
-                        <div style={{ fontSize: 12, color: "#e2e8f0", fontWeight: i === 0 ? 600 : 400 }}>{sc.label}</div>
-                        <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>수수료 -{fmt(sc.fee)}</div>
+                        <div style={{ fontSize: 12, color: T.textMid, fontWeight: i === 0 ? 600 : 400 }}>{sc.label}</div>
+                        <div style={{ fontSize: 10, color: T.textDim, marginTop: 2 }}>수수료 -{fmt(sc.fee)}</div>
                       </div>
                       <div style={{
                         fontSize: i === 0 ? 15 : 13, fontWeight: 700,
-                        color: sc.net >= 0 ? "#34d399" : "#f87171",
+                        color: sc.net >= 0 ? T.accent : T.danger,
                         fontFamily: "'IBM Plex Mono'",
                       }}>
                         {fmtS(sc.net)} USDT
@@ -4004,24 +4391,24 @@ export default function SimV4() {
                 <HLCard label="현재 합산 PnL"
                   value={`${fmtS(pr.combinedPnL)} USDT`}
                   delta={`물린 ${fmtS(pr.locked?.pnl || 0)} / 반대 ${fmtS(pr.combinedPnL - (pr.locked?.pnl || 0))}`}
-                  deltaColor={pr.combinedPnL >= 0 ? "#34d399" : "#f87171"} />
+                  deltaColor={pr.combinedPnL >= 0 ? T.accent : T.danger} />
                 {hasExLiq && pr.newLiqPrice != null ? (
                   <HLCard label="새 청산가 (추정)"
                     value={`$${fmt(pr.newLiqPrice)}`}
                     delta={pr.newLiqDist != null ? `여유 ${fmt(Math.abs(pr.newLiqDist))}%${pr.liqBefore ? ` (기존 $${fmt(pr.liqBefore)})` : ""}` : null}
-                    deltaColor={Math.abs(pr.newLiqDist || 0) < 15 ? "#f87171" : "#34d399"} />
+                    deltaColor={Math.abs(pr.newLiqDist || 0) < 15 ? T.danger : T.accent} />
                 ) : (
                   <HLCard label="기존 청산가"
                     value={pr.liqBefore ? `$${fmt(pr.liqBefore)}` : "—"}
                     delta={pr.liqDistBefore != null ? `${fmt(Math.abs(pr.liqDistBefore))}% 여유` : null}
-                    deltaColor="#6b7280" />
+                    deltaColor=T.textMuted />
                 )}
               </div>
 
               {/* Stage-by-stage table */}
               {pr.stages.length > 0 && (
                 <>
-                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: "#f59e0b", fontFamily: "'DM Sans'", marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: T.warning, fontFamily: "'DM Sans'", marginBottom: 8 }}>
                     진입 단계별 역전가 변화
                   </div>
                   <div style={S.tblWrap}>
@@ -4036,14 +4423,14 @@ export default function SimV4() {
                       <tbody>
                         {pr.stages.map((st, i) => (
                           <tr key={i} style={i === pr.stages.length - 1 ? { background: "#0c0c18" } : {}}>
-                            <TD c={i === pr.stages.length - 1 ? "#f59e0b" : "#94a3b8"}>{st.label}</TD>
+                            <TD c={i === pr.stages.length - 1 ? T.warning : T.textSub}>{st.label}</TD>
                             <TD>{fmt(st.margin, 0)}</TD>
-                            <TD c="#e2e8f0">{fmt(st.cumMargin, 0)}</TD>
-                            <TD c="#f59e0b">{st.reversalPrice ? `$${fmt(st.reversalPrice)}` : "—"}</TD>
+                            <TD c=T.textMid>{fmt(st.cumMargin, 0)}</TD>
+                            <TD c=T.warning>{st.reversalPrice ? `$${fmt(st.reversalPrice)}` : "—"}</TD>
                             {hasExLiq && (
                               <>
                                 <TD>{st.liqPrice ? `$${fmt(st.liqPrice)}` : "—"}</TD>
-                                <TD c={st.liqDist != null && Math.abs(st.liqDist) < 15 ? "#f87171" : "#34d399"}>
+                                <TD c={st.liqDist != null && Math.abs(st.liqDist) < 15 ? T.danger : T.accent}>
                                   {st.liqDist != null ? `${fmt(Math.abs(st.liqDist))}%` : "—"}
                                 </TD>
                               </>
@@ -4067,17 +4454,17 @@ export default function SimV4() {
                     const pctOf = (p) => ((p - minP) / range) * 100;
 
                     return (
-                      <div style={{ padding: 16, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e", marginTop: 8, marginBottom: 12 }}>
-                        <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 12 }}>역전가 접근 시각화</div>
+                      <div style={{ padding: 16, borderRadius: 10, background: T.bgCard, border: `1px solid ${T.border}`, marginTop: 8, marginBottom: 12 }}>
+                        <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 12 }}>역전가 접근 시각화</div>
                         <div style={{ position: "relative", height: validStages.length * 28 + 20 }}>
                           {/* Current price line */}
                           <div style={{
                             position: "absolute", left: `${pctOf(calc.cp)}%`, top: 0, bottom: 0,
-                            width: 1, background: "#4b5563", zIndex: 1,
+                            width: 1, background: T.textDim, zIndex: 1,
                           }} />
                           <div style={{
                             position: "absolute", left: `${pctOf(calc.cp)}%`, top: -2,
-                            transform: "translateX(-50%)", fontSize: 9, color: "#6b7280", whiteSpace: "nowrap",
+                            transform: "translateX(-50%)", fontSize: 9, color: T.textMuted, whiteSpace: "nowrap",
                           }}>현재가</div>
 
                           {/* Liq price line */}
@@ -4085,11 +4472,11 @@ export default function SimV4() {
                             <>
                               <div style={{
                                 position: "absolute", left: `${pctOf(pr.liqBefore)}%`, top: 0, bottom: 0,
-                                width: 1, background: "#f8717144", zIndex: 1,
+                                width: 1, background: `${T.danger}44`, zIndex: 1,
                               }} />
                               <div style={{
                                 position: "absolute", left: `${pctOf(pr.liqBefore)}%`, bottom: -2,
-                                transform: "translateX(-50%)", fontSize: 8, color: "#f8717188", whiteSpace: "nowrap",
+                                transform: "translateX(-50%)", fontSize: 8, color: `${T.danger}88`, whiteSpace: "nowrap",
                               }}>청산</div>
                             </>
                           )}
@@ -4102,11 +4489,11 @@ export default function SimV4() {
                               <div key={i} style={{
                                 position: "absolute", top: 14 + i * 28, left: `${left}%`, width: `${right - left}%`,
                                 height: 16, borderRadius: 3,
-                                background: `linear-gradient(90deg, #f59e0b22, #f59e0b${Math.min(20 + i * 15, 60).toString(16)})`,
-                                border: "1px solid #f59e0b33",
+                                background: `linear-gradient(90deg, ${T.warning}22, ${T.warning}${Math.min(20 + i * 15, 60).toString(16)})`,
+                                border: `1px solid ${T.warning}33`,
                                 display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 4,
                               }}>
-                                <span style={{ fontSize: 9, color: "#f59e0b", whiteSpace: "nowrap" }}>
+                                <span style={{ fontSize: 9, color: T.warning, whiteSpace: "nowrap" }}>
                                   {st.label}
                                 </span>
                               </div>
@@ -4122,8 +4509,8 @@ export default function SimV4() {
               {/* Simultaneous close scenarios table */}
               {pr.scenarios.length > 0 && (
                 <div style={S.exitBox}>
-                  <div style={{ ...S.exitTitle, color: "#f59e0b" }}>동시 청산 시나리오</div>
-                  <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 12 }}>
+                  <div style={{ ...S.exitTitle, color: T.warning }}>동시 청산 시나리오</div>
+                  <div style={{ fontSize: 11, color: T.textDim, marginBottom: 12 }}>
                     다양한 가격에서 양 포지션 동시 청산 시 결과
                   </div>
                   <div style={S.tblWrap}>
@@ -4143,16 +4530,16 @@ export default function SimV4() {
                           const isCurrent = sc.label === "현재가";
                           return (
                             <tr key={i} style={{
-                              background: isReversal ? "#f59e0b08" : isCurrent ? "#0c0c18" : "transparent",
+                              background: isReversal ? `${T.warning}08` : isCurrent ? "#0c0c18" : "transparent",
                             }}>
-                              <TD c={isReversal ? "#f59e0b" : isCurrent ? "#e2e8f0" : "#94a3b8"}>
+                              <TD c={isReversal ? T.warning : isCurrent ? T.textMid : T.textSub}>
                                 <div>{sc.label}</div>
-                                <div style={{ fontSize: 10, color: "#4b5563" }}>${fmt(sc.price)}</div>
+                                <div style={{ fontSize: 10, color: T.textDim }}>${fmt(sc.price)}</div>
                               </TD>
-                              <TD c={sc.lockedPnL >= 0 ? "#34d399" : "#f87171"}>{fmtS(sc.lockedPnL, 0)}</TD>
-                              <TD c={sc.counterPnL >= 0 ? "#34d399" : "#f87171"}>{fmtS(sc.counterPnL, 0)}</TD>
-                              <TD c="#6b7280">-{fmt(sc.fee, 0)}</TD>
-                              <TD c={sc.net >= 0 ? "#34d399" : "#f87171"} bold>
+                              <TD c={sc.lockedPnL >= 0 ? T.accent : T.danger}>{fmtS(sc.lockedPnL, 0)}</TD>
+                              <TD c={sc.counterPnL >= 0 ? T.accent : T.danger}>{fmtS(sc.counterPnL, 0)}</TD>
+                              <TD c=T.textMuted>-{fmt(sc.fee, 0)}</TD>
+                              <TD c={sc.net >= 0 ? T.accent : T.danger} bold>
                                 {fmtS(sc.net, 0)}
                               </TD>
                             </tr>
@@ -4176,39 +4563,39 @@ export default function SimV4() {
 
               {/* 불타기 vs 물타기 비교 */}
               {pr.dcaComparison && pr.pyraList.length > 0 && (
-                <div style={{ ...S.card, borderColor: "#6b728033", marginTop: 8 }}>
-                  <div style={{ fontSize: 10, color: "#6b7280", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+                <div style={{ ...S.card, borderColor: `${T.textMuted}33`, marginTop: 8 }}>
+                  <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
                     같은 금액({fmt(pr.addTotalMargin, 0)} USDT) 투입 시 비교
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr", gap: 0, fontSize: 12 }}>
                     {/* header */}
-                    <div style={{ padding: "6px 8px", color: "#4b5563", fontSize: 10 }}></div>
-                    <div style={{ padding: "6px 8px", color: "#f59e0b", fontSize: 10, fontWeight: 700, textAlign: "center" }}>🔥 불타기</div>
-                    <div style={{ padding: "6px 8px", color: "#0ea5e9", fontSize: 10, fontWeight: 700, textAlign: "center" }}>💧 물타기</div>
+                    <div style={{ padding: "6px 8px", color: T.textDim, fontSize: 10 }}></div>
+                    <div style={{ padding: "6px 8px", color: T.warning, fontSize: 10, fontWeight: 700, textAlign: "center" }}>🔥 불타기</div>
+                    <div style={{ padding: "6px 8px", color: T.accentBlue, fontSize: 10, fontWeight: 700, textAlign: "center" }}>💧 물타기</div>
                     {/* 본전/역전 가격 */}
-                    <div style={{ padding: "6px 8px", color: "#6b7280", fontSize: 10, borderTop: "1px solid #1e1e2e" }}>본전/역전가</div>
-                    <div style={{ padding: "6px 8px", textAlign: "center", borderTop: "1px solid #1e1e2e", color: "#f59e0b", fontWeight: 600 }}>
+                    <div style={{ padding: "6px 8px", color: T.textMuted, fontSize: 10, borderTop: `1px solid ${T.border}` }}>본전/역전가</div>
+                    <div style={{ padding: "6px 8px", textAlign: "center", borderTop: `1px solid ${T.border}`, color: T.warning, fontWeight: 600 }}>
                       {pr.dcaComparison.pyraReversal ? `$${fmt(pr.dcaComparison.pyraReversal)}` : "—"}
                     </div>
-                    <div style={{ padding: "6px 8px", textAlign: "center", borderTop: "1px solid #1e1e2e", color: "#0ea5e9", fontWeight: 600 }}>
+                    <div style={{ padding: "6px 8px", textAlign: "center", borderTop: `1px solid ${T.border}`, color: T.accentBlue, fontWeight: 600 }}>
                       ${fmt(pr.dcaComparison.dcaBreakeven)}
                     </div>
                     {/* 청산가 */}
                     {hasExLiq && (<>
-                      <div style={{ padding: "6px 8px", color: "#6b7280", fontSize: 10, borderTop: "1px solid #0e0e18" }}>청산가</div>
-                      <div style={{ padding: "6px 8px", textAlign: "center", borderTop: "1px solid #0e0e18", color: "#94a3b8" }}>
+                      <div style={{ padding: "6px 8px", color: T.textMuted, fontSize: 10, borderTop: `1px solid ${T.borderSub}` }}>청산가</div>
+                      <div style={{ padding: "6px 8px", textAlign: "center", borderTop: `1px solid ${T.borderSub}`, color: T.textSub }}>
                         {pr.dcaComparison.pyraLiq ? `$${fmt(pr.dcaComparison.pyraLiq)}` : "—"}
                       </div>
-                      <div style={{ padding: "6px 8px", textAlign: "center", borderTop: "1px solid #0e0e18", color: "#94a3b8" }}>
+                      <div style={{ padding: "6px 8px", textAlign: "center", borderTop: `1px solid ${T.borderSub}`, color: T.textSub }}>
                         {pr.dcaComparison.dcaLiq ? `$${fmt(pr.dcaComparison.dcaLiq)}` : "—"}
                       </div>
                     </>)}
                     {/* 특징 */}
-                    <div style={{ padding: "6px 8px", color: "#6b7280", fontSize: 10, borderTop: "1px solid #0e0e18" }}>특징</div>
-                    <div style={{ padding: "6px 8px", textAlign: "center", borderTop: "1px solid #0e0e18", fontSize: 10, color: "#4b5563" }}>
+                    <div style={{ padding: "6px 8px", color: T.textMuted, fontSize: 10, borderTop: `1px solid ${T.borderSub}` }}>특징</div>
+                    <div style={{ padding: "6px 8px", textAlign: "center", borderTop: `1px solid ${T.borderSub}`, fontSize: 10, color: T.textDim }}>
                       양방향 헷지 유지
                     </div>
-                    <div style={{ padding: "6px 8px", textAlign: "center", borderTop: "1px solid #0e0e18", fontSize: 10, color: "#4b5563" }}>
+                    <div style={{ padding: "6px 8px", textAlign: "center", borderTop: `1px solid ${T.borderSub}`, fontSize: 10, color: T.textDim }}>
                       평단 낮추기 집중
                     </div>
                   </div>
@@ -4227,9 +4614,9 @@ export default function SimV4() {
                   setPyraEntries([mkPyra()]);
                 }} style={{
                   width: "100%", padding: "14px 0", marginTop: 12, borderRadius: 10,
-                  border: "1px solid #f59e0b44",
-                  background: "#f59e0b10",
-                  color: "#f59e0b",
+                  border: `1px solid ${T.warning}44`,
+                  background: `${T.warning}10`,
+                  color: T.warning,
                   fontSize: 14, fontWeight: 700, cursor: "pointer",
                   fontFamily: "'DM Sans'", letterSpacing: 0.5,
                   transition: "all 0.15s",
@@ -4245,7 +4632,7 @@ export default function SimV4() {
         {calc?.pyraRevResult && (() => {
           const prv = calc.pyraRevResult;
           if (prv.alreadyReversed) return (
-            <div style={{ ...S.warnBox, borderColor: "#34d39933", color: "#34d399", background: "#34d39908" }}>
+            <div style={{ ...S.warnBox, borderColor: `${T.accent}33`, color: T.accent, background: `${T.accent}08` }}>
               ✓ 현재 상태에서 이미 해당 가격에 도달하면 손익이 역전됩니다. 추가 불타기 불필요.
             </div>
           );
@@ -4254,23 +4641,23 @@ export default function SimV4() {
           );
           return (
             <>
-              <div style={{ ...S.divider, background: "linear-gradient(90deg, transparent, #f59e0b22, transparent)" }} />
+              <div style={{ ...S.divider, background: `linear-gradient(90deg, transparent, ${T.warning}22, transparent)` }} />
               <Sec label="역계산 결과" pyra />
               <div style={{
                 ...S.revHL,
-                borderColor: prv.marginInsufficient ? "#f8717144" : "#f59e0b44",
+                borderColor: prv.marginInsufficient ? `${T.danger}44` : `${T.warning}44`,
               }}>
-                <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>필요 추가 마진</div>
-                <div style={{ fontSize: 28, fontWeight: 700, color: prv.marginInsufficient ? "#f87171" : "#f59e0b" }}>
+                <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 6 }}>필요 추가 마진</div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: prv.marginInsufficient ? T.danger : T.warning }}>
                   {fmt(prv.neededMargin)} USDT
                 </div>
                 {prv.marginInsufficient && (
-                  <div style={{ fontSize: 12, color: "#f87171", marginTop: 8 }}>
+                  <div style={{ fontSize: 12, color: T.danger, marginTop: 8 }}>
                     ⚠ 여유 마진 부족 — {fmt(prv.neededMargin - (calc.freeMargin || 0))} USDT 모자람
                   </div>
                 )}
                 {prv.feasible && (
-                  <div style={{ fontSize: 12, color: "#34d399", marginTop: 8 }}>✓ 여유 마진 내 가능</div>
+                  <div style={{ fontSize: 12, color: T.accent, marginTop: 8 }}>✓ 여유 마진 내 가능</div>
                 )}
               </div>
               <div style={S.detBox}>
@@ -4315,27 +4702,27 @@ export default function SimV4() {
               <Sec label="역계산 결과" />
               <div style={{
                 ...S.revHL,
-                borderColor: rv.marginInsufficient ? "#f8717144" : "#0ea5e944",
+                borderColor: rv.marginInsufficient ? `${T.danger}44` : `${T.accentBlue}44`,
               }}>
-                <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>필요 추가 마진</div>
-                <div style={{ fontSize: 28, fontWeight: 700, color: rv.marginInsufficient ? "#f87171" : "#0ea5e9" }}>
+                <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 6 }}>필요 추가 마진</div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: rv.marginInsufficient ? T.danger : T.accentBlue }}>
                   {fmt(rv.requiredMargin)} USDT
                 </div>
-                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-                  투입 필요: {fmt(rv.requiredInputMargin)} USDT <span style={{ color: "#4b5563" }}>(수수료 {fmt(rv.revFeeDeduct)} 포함)</span>
+                <div style={{ fontSize: 12, color: T.textMuted, marginTop: 4 }}>
+                  투입 필요: {fmt(rv.requiredInputMargin)} USDT <span style={{ color: T.textDim }}>(수수료 {fmt(rv.revFeeDeduct)} 포함)</span>
                 </div>
                 {rv.marginInsufficient && (
-                  <div style={{ fontSize: 12, color: "#f87171", marginTop: 8 }}>
+                  <div style={{ fontSize: 12, color: T.danger, marginTop: 8 }}>
                     ⚠ 여유 마진 부족 — {fmt(rv.requiredMargin - calc.freeMargin)} USDT 모자람
                     {rv.maxReachableAvg != null && (
-                      <div style={{ marginTop: 4, color: "#f59e0b" }}>
+                      <div style={{ marginTop: 4, color: T.warning }}>
                         현재 여유 마진으로 도달 가능한 최대 평단: ${fmt(rv.maxReachableAvg)}
                       </div>
                     )}
                   </div>
                 )}
                 {!rv.marginInsufficient && (
-                  <div style={{ fontSize: 12, color: "#34d399", marginTop: 8 }}>✓ 여유 마진 내 가능</div>
+                  <div style={{ fontSize: 12, color: T.accent, marginTop: 8 }}>✓ 여유 마진 내 가능</div>
                 )}
               </div>
               <ResultBlock r={rv} isLong={isLong} cp={calc.cp} mode="reverse" hasExLiq={calc?.exLiq > 0} />
@@ -4356,16 +4743,16 @@ export default function SimV4() {
               {/* Realized PnL highlight */}
               <div style={{
                 ...S.revHL,
-                borderColor: cr.realizedPnL >= 0 ? "#34d39944" : "#f8717144",
+                borderColor: cr.realizedPnL >= 0 ? `${T.accent}44` : `${T.danger}44`,
               }}>
-                <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>실현 손익</div>
+                <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 6 }}>실현 손익</div>
                 <div style={{
                   fontSize: 28, fontWeight: 700,
-                  color: cr.realizedPnL >= 0 ? "#34d399" : "#f87171",
+                  color: cr.realizedPnL >= 0 ? T.accent : T.danger,
                 }}>
                   {fmtS(cr.realizedPnL)} USDT
                 </div>
-                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                <div style={{ fontSize: 12, color: T.textMuted, marginTop: 4 }}>
                   마진 {fmt(cr.closedMargin)} 해제 · 수수료 {fmt(cr.closeFee)} USDT
                 </div>
               </div>
@@ -4385,7 +4772,7 @@ export default function SimV4() {
                     </thead>
                     <tbody>
                       <tr>
-                        <TD c="#6b7280">Before</TD>
+                        <TD c=T.textMuted>Before</TD>
                         <TD>{fmt(calc.wb)}</TD>
                         <TD>{fmt(calc.sel.mg)}</TD>
                         <TD>{fmt(calc.freeMargin)}</TD>
@@ -4395,28 +4782,28 @@ export default function SimV4() {
                             <TD>{cr.liqDistBefore != null ? `${fmt(Math.abs(cr.liqDistBefore))}%` : "—"}</TD>
                           </>
                         )}
-                        <TD c={calc.sel.pnl >= 0 ? "#34d399" : "#f87171"}>
+                        <TD c={calc.sel.pnl >= 0 ? T.accent : T.danger}>
                           {fmtS(calc.sel.pnl)} ({fmtS(calc.sel.roe)}%)
                         </TD>
                       </tr>
                       <tr style={{ background: "#0c0c18" }}>
-                        <TD c="#e2e8f0" bold>After</TD>
-                        <TD c="#e2e8f0">{fmt(cr.newWallet)}</TD>
-                        <TD c="#e2e8f0">{fmt(cr.remaining.margin)}</TD>
-                        <TD c={cr.remFreeMargin > 0 ? "#34d399" : "#f87171"} bold>
+                        <TD c=T.textMid bold>After</TD>
+                        <TD c=T.textMid>{fmt(cr.newWallet)}</TD>
+                        <TD c=T.textMid>{fmt(cr.remaining.margin)}</TD>
+                        <TD c={cr.remFreeMargin > 0 ? T.accent : T.danger} bold>
                           {fmt(cr.remFreeMargin)}
                         </TD>
                         {hasExLiq && (
                           <>
-                            <TD c={cr.remLiq != null ? "#34d399" : "#6b7280"}>
+                            <TD c={cr.remLiq != null ? T.accent : T.textMuted}>
                               {cr.remLiq != null ? `$${fmt(cr.remLiq)}` : "—"}
                             </TD>
-                            <TD c="#34d399">
+                            <TD c=T.accent>
                               {cr.remLiqDist != null ? `${fmt(Math.abs(cr.remLiqDist))}%` : "—"}
                             </TD>
                           </>
                         )}
-                        <TD c={cr.remaining.pnl >= 0 ? "#34d399" : "#f87171"} bold>
+                        <TD c={cr.remaining.pnl >= 0 ? T.accent : T.danger} bold>
                           {cr.remaining.qty > 0
                             ? `${fmtS(cr.remaining.pnl)} (${fmtS(cr.remaining.roe)}%)`
                             : "포지션 청산됨"}
@@ -4442,26 +4829,26 @@ export default function SimV4() {
               {cr.closeAndDCA && cr.remaining.qty > 0 && (
                 <div style={S.cdBox}>
                   <div style={S.cdTitle}>손절 후 물타기 시나리오</div>
-                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 10 }}>
                     남은 포지션에 확보된 {fmt(cr.remFreeMargin, 0)} USDT로
                     ${fmt(cr.closeAndDCA.dcaPrice)}에 물타기 시
                   </div>
                   <div style={S.hlGrid}>
                     <HLCard label="새 평단가" value={`$${fmt(cr.closeAndDCA.newAvg)}`}
                       delta={`기존 대비 ${fmtS(pct(cr.closeAndDCA.newAvg - calc.sel.ep, calc.sel.ep))}%`}
-                      deltaColor={(isLong && cr.closeAndDCA.newAvg < calc.sel.ep) || (!isLong && cr.closeAndDCA.newAvg > calc.sel.ep) ? "#34d399" : "#f87171"} />
+                      deltaColor={(isLong && cr.closeAndDCA.newAvg < calc.sel.ep) || (!isLong && cr.closeAndDCA.newAvg > calc.sel.ep) ? T.accent : T.danger} />
                     <HLCard label="탈출가" value={`$${fmt(cr.closeAndDCA.breakeven)}`}
                       delta={cr.closeAndDCA.liq != null ? `청산가 $${fmt(cr.closeAndDCA.liq)}` : ""}
-                      deltaColor="#f59e0b" />
+                      deltaColor=T.warning />
                   </div>
-                  <div style={{ fontSize: 10, color: "#4b5563", marginTop: 4 }}>
+                  <div style={{ fontSize: 10, color: T.textDim, marginTop: 4 }}>
                     * 시뮬레이션 모드의 첫 번째 물타기 진입가 기준
                   </div>
                 </div>
               )}
 
               {cr.remaining.qty === 0 && (
-                <div style={{ ...S.warnBox, borderColor: "#f59e0b33", color: "#f59e0b", background: "#f59e0b08" }}>
+                <div style={{ ...S.warnBox, borderColor: `${T.warning}33`, color: T.warning, background: `${T.warning}08` }}>
                   100% 손절 시 포지션이 완전히 청산됩니다. 실현 손실이 지갑 잔고에서 차감됩니다.
                 </div>
               )}
@@ -4472,7 +4859,7 @@ export default function SimV4() {
         <div style={S.footer}>
           교차 마진 · 수수료 왕복 · 펀딩비 미반영
         </div>
-        <div style={{ textAlign: "center", padding: "0 20px 16px", fontSize: 8, color: "#2a2a3a", lineHeight: 1.6, fontFamily: "'DM Sans'" }}>
+        <div style={{ textAlign: "center", padding: "0 20px 16px", fontSize: 8, color: T.textDark, lineHeight: 1.6, fontFamily: "'DM Sans'" }}>
           본 도구는 공개된 수학 공식을 기반으로 한 포지션 계산기이며, 투자 자문·매매 권유·수익 보장의 목적이 아닙니다.<br />
           모든 거래 판단과 책임은 이용자 본인에게 있습니다.
         </div>
@@ -4490,7 +4877,7 @@ export default function SimV4() {
             </Fld>
             <div style={{ flex: 1 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "'DM Sans'" }}>
+                <div style={{ fontSize: 11, color: T.textMuted, fontFamily: "'DM Sans'" }}>
                   현재가 ($) — {primaryCoin}/USDT
                 </div>
                 <button onClick={() => {
@@ -4498,16 +4885,16 @@ export default function SimV4() {
                   else { setPriceMode("live"); setFetchError(false); }
                 }} style={{
                   ...S.miniBtn, fontSize: 9, padding: "2px 8px",
-                  color: priceMode === "live" ? "#34d399" : "#6b7280",
-                  borderColor: priceMode === "live" ? "#34d39933" : "#1e1e2e",
+                  color: priceMode === "live" ? T.accent : T.textMuted,
+                  borderColor: priceMode === "live" ? `${T.accent}33` : T.border,
                 }}>
                   {priceMode === "live" ? "✎ 수동" : "↻ 실시간"}
                 </button>
               </div>
               <input type="number" value={coinPrices[primaryCoin] || ""} placeholder={`${primaryCoin}/USDT`}
                 readOnly={priceMode === "live"} onChange={(e) => setCp(primaryCoin, e.target.value)}
-                style={{ ...S.inp, flex: 1, borderColor: priceMode === "live" ? "#34d39944" : "#1e1e2e",
-                  background: priceMode === "live" ? "#060d08" : "#0a0a12",
+                style={{ ...S.inp, flex: 1, borderColor: priceMode === "live" ? `${T.accent}44` : T.border,
+                  background: priceMode === "live" ? "#060d08" : T.bgInput,
                   cursor: priceMode === "live" ? "default" : "text", transition: "color 0.3s" }} />
             </div>
           </div>
@@ -4543,8 +4930,8 @@ export default function SimV4() {
           {/* HC ③ 현재 포지션 입력 */}
           <Sec label="현재 포지션" />
           <div style={S.grid2}>
-            <div style={{ ...S.card, borderColor: "#34d39933", background: "#060d08" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#34d399", marginBottom: 8, fontFamily: "'DM Sans'" }}>LONG</div>
+            <div style={{ ...S.card, borderColor: `${T.accent}33`, background: "#060d08" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.accent, marginBottom: 8, fontFamily: "'DM Sans'" }}>LONG</div>
               <Fld label="진입가 ($)">
                 <Inp value={hcLongEntry} onChange={setHcLongEntry} ph="진입 평단가" />
               </Fld>
@@ -4554,13 +4941,13 @@ export default function SimV4() {
                 </Fld>
               </div>
               {hcCalc && n(hcLongEntry) > 0 && (
-                <div style={{ marginTop: 8, fontSize: 12, color: hcCalc.longROE >= 0 ? "#34d399" : "#f87171", fontWeight: 600 }}>
+                <div style={{ marginTop: 8, fontSize: 12, color: hcCalc.longROE >= 0 ? T.accent : T.danger, fontWeight: 600 }}>
                   PnL: {fmtS(hcCalc.longPnL)} ({fmtS(hcCalc.longROE)}%)
                 </div>
               )}
             </div>
-            <div style={{ ...S.card, borderColor: "#f8717133", background: "#0d0608" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#f87171", marginBottom: 8, fontFamily: "'DM Sans'" }}>SHORT</div>
+            <div style={{ ...S.card, borderColor: `${T.danger}33`, background: "#0d0608" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.danger, marginBottom: 8, fontFamily: "'DM Sans'" }}>SHORT</div>
               <Fld label="진입가 ($)">
                 <Inp value={hcShortEntry} onChange={setHcShortEntry} ph="진입 평단가" />
               </Fld>
@@ -4570,7 +4957,7 @@ export default function SimV4() {
                 </Fld>
               </div>
               {hcCalc && n(hcShortEntry) > 0 && (
-                <div style={{ marginTop: 8, fontSize: 12, color: hcCalc.shortROE >= 0 ? "#34d399" : "#f87171", fontWeight: 600 }}>
+                <div style={{ marginTop: 8, fontSize: 12, color: hcCalc.shortROE >= 0 ? T.accent : T.danger, fontWeight: 600 }}>
                   PnL: {fmtS(hcCalc.shortPnL)} ({fmtS(hcCalc.shortROE)}%)
                 </div>
               )}
@@ -4584,16 +4971,16 @@ export default function SimV4() {
             {/* 현재 상태 표시 */}
             <div style={{
               padding: 20, borderRadius: 12, textAlign: "center", marginBottom: 12,
-              background: hcCalc.state === 1 ? "#34d39908" : hcCalc.state === 3 ? "#0ea5e908" : "#f59e0b08",
-              border: `1px solid ${hcCalc.state === 1 ? "#34d39933" : hcCalc.state === 3 ? "#0ea5e933" : "#f59e0b33"}`,
+              background: hcCalc.state === 1 ? `${T.accent}08` : hcCalc.state === 3 ? `${T.accentBlue}08` : `${T.warning}08`,
+              border: `1px solid ${hcCalc.state === 1 ? `${T.accent}33` : hcCalc.state === 3 ? `${T.accentBlue}33` : `${T.warning}33`}`,
             }}>
               <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "'DM Sans'", marginBottom: 6,
-                color: hcCalc.state === 1 ? "#34d399" : hcCalc.state === 3 ? "#0ea5e9" : "#f59e0b" }}>
+                color: hcCalc.state === 1 ? T.accent : hcCalc.state === 3 ? T.accentBlue : T.warning }}>
                 {hcCalc.state === 1 ? "🟢 상태 1 — Balanced (1:1)" :
                  hcCalc.state === 3 ? "🔵 상태 3 — Recovery 가능" :
                  "🟡 상태 2 — Imbalanced"}
               </div>
-              <div style={{ fontSize: 11, color: "#6b7280" }}>
+              <div style={{ fontSize: 11, color: T.textMuted }}>
                 롱 {fmt(hcCalc.longMg, 0)} : 숏 {fmt(hcCalc.shortMg, 0)}
                 {!hcCalc.isBalanced && ` (${fmt(hcCalc.ratio, 1)}:1)`}
               </div>
@@ -4601,34 +4988,34 @@ export default function SimV4() {
 
             {/* 트리거 프로그레스 */}
             {hcCalc.state === 1 && (
-              <div style={{ ...S.card, borderColor: "#1e1e2e" }}>
-                <div style={{ fontSize: 10, color: "#6b7280", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+              <div style={{ ...S.card, borderColor: T.border }}>
+                <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
                   익절 트리거 대기
                 </div>
                 {hcCalc.winner && (
                   <>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
-                      <span style={{ color: "#94a3b8" }}>
+                      <span style={{ color: T.textSub }}>
                         {hcCalc.winner === "long" ? "롱" : "숏"} ROE: {fmtS(hcCalc.winnerROE)}%
                       </span>
-                      <span style={{ color: "#0ea5e9" }}>목표: +{hcCalc.takeROE}%</span>
+                      <span style={{ color: T.accentBlue }}>목표: +{hcCalc.takeROE}%</span>
                     </div>
-                    <div style={{ height: 8, background: "#1e1e2e", borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{ height: 8, background: T.border, borderRadius: 4, overflow: "hidden" }}>
                       <div style={{
                         height: "100%", borderRadius: 4, transition: "width 0.3s",
                         width: `${Math.max(hcCalc.winnerProgress * 100, 0)}%`,
-                        background: hcCalc.winnerProgress >= 1 ? "#34d399" : "linear-gradient(90deg, #0ea5e9, #34d399)",
+                        background: hcCalc.winnerProgress >= 1 ? T.accent : `linear-gradient(90deg, ${T.accentBlue}, ${T.accent})`,
                       }} />
                     </div>
-                    <div style={{ fontSize: 11, color: "#4b5563", marginTop: 6 }}>
+                    <div style={{ fontSize: 11, color: T.textDim, marginTop: 6 }}>
                       {hcCalc.winnerProgress >= 1 ? (
-                        <span style={{ color: "#34d399", fontWeight: 600 }}>🚨 트리거 도달! 아래 액션을 실행하세요</span>
+                        <span style={{ color: T.accent, fontWeight: 600 }}>🚨 트리거 도달! 아래 액션을 실행하세요</span>
                       ) : (
                         <>
-                          트리거 가격: <span style={{ color: "#e2e8f0" }}>
+                          트리거 가격: <span style={{ color: T.textMid }}>
                             ${fmt(hcCalc.winner === "long" ? hcCalc.longTriggerPrice : hcCalc.shortTriggerPrice)}
                           </span>
-                          <span style={{ color: "#4b5563", marginLeft: 6 }}>
+                          <span style={{ color: T.textDim, marginLeft: 6 }}>
                             ({fmtS(((hcCalc.winner === "long" ? hcCalc.longTriggerPrice : hcCalc.shortTriggerPrice) - getCp(primaryCoin)) / getCp(primaryCoin) * 100)}%)
                           </span>
                         </>
@@ -4641,19 +5028,19 @@ export default function SimV4() {
 
             {/* 복구 프로그레스 (state 2) */}
             {hcCalc.state === 2 && hcCalc.recoveryPrice && (
-              <div style={{ ...S.card, borderColor: "#f59e0b33" }}>
-                <div style={{ fontSize: 10, color: "#f59e0b", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+              <div style={{ ...S.card, borderColor: `${T.warning}33` }}>
+                <div style={{ fontSize: 10, color: T.warning, letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
                   복구 대기 — {hcCalc.loser === "long" ? "롱" : "숏"} 본전 복귀 중
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
-                  <span style={{ color: "#94a3b8" }}>
+                  <span style={{ color: T.textSub }}>
                     {hcCalc.loser === "long" ? "롱" : "숏"} ROE: {fmtS(hcCalc.loserROE)}%
                   </span>
-                  <span style={{ color: "#0ea5e9" }}>목표: {hcCalc.recovROE}%</span>
+                  <span style={{ color: T.accentBlue }}>목표: {hcCalc.recovROE}%</span>
                 </div>
-                <div style={{ fontSize: 11, color: "#4b5563", marginTop: 6 }}>
-                  복구 가격: <span style={{ color: "#e2e8f0" }}>${fmt(hcCalc.recoveryPrice)}</span>
-                  <span style={{ color: "#4b5563", marginLeft: 6 }}>
+                <div style={{ fontSize: 11, color: T.textDim, marginTop: 6 }}>
+                  복구 가격: <span style={{ color: T.textMid }}>${fmt(hcCalc.recoveryPrice)}</span>
+                  <span style={{ color: T.textDim, marginLeft: 6 }}>
                     ({fmtS(((hcCalc.recoveryPrice) - getCp(primaryCoin)) / getCp(primaryCoin) * 100)}%)
                   </span>
                 </div>
@@ -4662,24 +5049,24 @@ export default function SimV4() {
 
             {/* 액션 체크리스트 */}
             {hcCalc.actions.length > 0 && (
-              <div style={{ ...S.card, borderColor: hcCalc.state === 3 ? "#0ea5e933" : "#34d39933" }}>
-                <div style={{ fontSize: 10, color: hcCalc.state === 3 ? "#0ea5e9" : "#34d399", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+              <div style={{ ...S.card, borderColor: hcCalc.state === 3 ? `${T.accentBlue}33` : `${T.accent}33` }}>
+                <div style={{ fontSize: 10, color: hcCalc.state === 3 ? T.accentBlue : T.accent, letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
                   {hcCalc.state === 3 ? "복구 액션" : "실행할 액션"}
                 </div>
                 {hcCalc.actions.map((act, i) => (
                   <div key={i} style={{
                     display: "flex", justifyContent: "space-between", alignItems: "center",
                     padding: "10px 12px", marginBottom: 4, borderRadius: 8,
-                    background: act.type === "profit" ? "#34d39908" : act.type === "loss" ? "#f8717108" : act.type === "recovery" ? "#0ea5e908" : "#0a0a14",
-                    border: `1px solid ${act.type === "profit" ? "#34d39922" : act.type === "loss" ? "#f8717122" : act.type === "recovery" ? "#0ea5e922" : "#1e1e2e"}`,
+                    background: act.type === "profit" ? `${T.accent}08` : act.type === "loss" ? `${T.danger}08` : act.type === "recovery" ? `${T.accentBlue}08` : T.bgInput2,
+                    border: `1px solid ${act.type === "profit" ? `${T.accent}22` : act.type === "loss" ? `${T.danger}22` : act.type === "recovery" ? `${T.accentBlue}22` : T.border}`,
                   }}>
                     <div>
-                      <div style={{ fontSize: 12, color: "#e2e8f0", fontWeight: 500 }}>{act.label}</div>
-                      <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>{act.detail}</div>
+                      <div style={{ fontSize: 12, color: T.textMid, fontWeight: 500 }}>{act.label}</div>
+                      <div style={{ fontSize: 10, color: T.textMuted, marginTop: 2 }}>{act.detail}</div>
                     </div>
                     <div style={{
                       fontSize: 11, fontWeight: 600,
-                      color: act.type === "profit" ? "#34d399" : act.type === "loss" ? "#f87171" : "#0ea5e9",
+                      color: act.type === "profit" ? T.accent : act.type === "loss" ? T.danger : T.accentBlue,
                     }}>
                       {act.type === "profit" ? "익절" : act.type === "loss" ? "손절" : act.type === "entry" ? "진입" : "복구"}
                     </div>
@@ -4690,22 +5077,22 @@ export default function SimV4() {
 
             {/* 손익 시뮬레이션 테이블 */}
             {hcCalc.cycleProfit && (
-              <div style={{ ...S.card, borderColor: "#0ea5e922" }}>
-                <div style={{ fontSize: 10, color: "#0ea5e9", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+              <div style={{ ...S.card, borderColor: `${T.accentBlue}22` }}>
+                <div style={{ fontSize: 10, color: T.accentBlue, letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
                   사이클 실행 시 예상 손익
                 </div>
                 {[
-                  { label: `${hcCalc.winner === "long" ? "롱" : "숏"} 익절 수익`, value: hcCalc.cycleProfit.winProfit, color: "#34d399", prefix: "+" },
-                  { label: "  └ 청산 수수료", value: -hcCalc.cycleProfit.winCloseFee, color: "#f87171", prefix: "" },
-                  { label: `${hcCalc.winner === "long" ? "롱" : "숏"} 재진입 수수료`, value: -hcCalc.cycleProfit.reentryFee, color: "#f87171", prefix: "" },
-                  { label: `${hcCalc.loser === "long" ? "롱" : "숏"} ${n(hcCutRatio)}% 손절`, value: hcCalc.cycleProfit.loserCutPnL, color: "#f87171", prefix: "" },
-                  { label: "  └ 청산 수수료", value: -hcCalc.cycleProfit.loserCutFee, color: "#f87171", prefix: "" },
+                  { label: `${hcCalc.winner === "long" ? "롱" : "숏"} 익절 수익`, value: hcCalc.cycleProfit.winProfit, color: T.accent, prefix: "+" },
+                  { label: "  └ 청산 수수료", value: -hcCalc.cycleProfit.winCloseFee, color: T.danger, prefix: "" },
+                  { label: `${hcCalc.winner === "long" ? "롱" : "숏"} 재진입 수수료`, value: -hcCalc.cycleProfit.reentryFee, color: T.danger, prefix: "" },
+                  { label: `${hcCalc.loser === "long" ? "롱" : "숏"} ${n(hcCutRatio)}% 손절`, value: hcCalc.cycleProfit.loserCutPnL, color: T.danger, prefix: "" },
+                  { label: "  └ 청산 수수료", value: -hcCalc.cycleProfit.loserCutFee, color: T.danger, prefix: "" },
                 ].map((row, i) => (
                   <div key={i} style={{
                     display: "flex", justifyContent: "space-between", padding: "4px 0",
-                    borderBottom: i < 4 ? "1px solid #0e0e18" : "none", fontSize: 12,
+                    borderBottom: i < 4 ? `1px solid ${T.borderSub}` : "none", fontSize: 12,
                   }}>
-                    <span style={{ color: "#94a3b8" }}>{row.label}</span>
+                    <span style={{ color: T.textSub }}>{row.label}</span>
                     <span style={{ color: row.color, fontWeight: 500 }}>
                       {row.prefix}{fmt(row.value)} USDT
                     </span>
@@ -4713,47 +5100,47 @@ export default function SimV4() {
                 ))}
                 <div style={{
                   display: "flex", justifyContent: "space-between", padding: "8px 0 4px",
-                  borderTop: "1px solid #1e1e2e", marginTop: 4, fontSize: 13, fontWeight: 700,
+                  borderTop: `1px solid ${T.border}`, marginTop: 4, fontSize: 13, fontWeight: 700,
                 }}>
-                  <span style={{ color: "#e2e8f0" }}>순수익</span>
-                  <span style={{ color: hcCalc.cycleProfit.netProfit >= 0 ? "#34d399" : "#f87171" }}>
+                  <span style={{ color: T.textMid }}>순수익</span>
+                  <span style={{ color: hcCalc.cycleProfit.netProfit >= 0 ? T.accent : T.danger }}>
                     {fmtS(hcCalc.cycleProfit.netProfit)} USDT
                   </span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11 }}>
-                  <span style={{ color: "#4b5563" }}>발생 거래량</span>
-                  <span style={{ color: "#6b7280" }}>{fmt(hcCalc.cycleProfit.totalVolume, 0)} USDT</span>
+                  <span style={{ color: T.textDim }}>발생 거래량</span>
+                  <span style={{ color: T.textMuted }}>{fmt(hcCalc.cycleProfit.totalVolume, 0)} USDT</span>
                 </div>
               </div>
             )}
 
             {/* 알림 가격 가이드 */}
             {hcCalc.alertPrices.length > 0 && (
-              <div style={{ ...S.card, borderColor: "#1e1e2e" }}>
-                <div style={{ fontSize: 10, color: "#6b7280", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+              <div style={{ ...S.card, borderColor: T.border }}>
+                <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
                   📌 거래소 알림 설정 가이드
                 </div>
                 {hcCalc.alertPrices.map((ap, i) => (
                   <div key={i} style={{
                     display: "flex", justifyContent: "space-between", alignItems: "center",
                     padding: "8px 10px", marginBottom: 4, borderRadius: 6,
-                    background: "#0a0a14", border: "1px solid #1e1e2e",
+                    background: T.bgInput2, border: `1px solid ${T.border}`,
                   }}>
                     <div>
                       <div style={{ fontSize: 11, color: ap.color, fontWeight: 600 }}>{ap.label}</div>
-                      <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>
+                      <div style={{ fontSize: 10, color: T.textDim, marginTop: 2 }}>
                         현재가 대비 {fmtS(((ap.price - getCp(primaryCoin)) / getCp(primaryCoin)) * 100)}%
                       </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 15, fontWeight: 700, color: "#e2e8f0", fontFamily: "'IBM Plex Mono'" }}>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: T.textMid, fontFamily: "'IBM Plex Mono'" }}>
                         ${fmt(ap.price)}
                       </span>
                       <button onClick={() => {
                         try { navigator.clipboard.writeText(String(ap.price.toFixed(2))); } catch (e) {}
                       }} style={{
                         ...S.miniBtn, fontSize: 10, padding: "3px 6px",
-                        color: "#4b5563", borderColor: "#1e1e2e",
+                        color: T.textDim, borderColor: T.border,
                       }} title="복사">📋</button>
                     </div>
                   </div>
@@ -4812,9 +5199,9 @@ export default function SimV4() {
                 }
               }} style={{
                 width: "100%", padding: "14px 0", marginTop: 8, borderRadius: 10,
-                border: `1px solid ${hcCalc.state === 3 ? "#0ea5e944" : "#34d39944"}`,
-                background: hcCalc.state === 3 ? "#0ea5e910" : "#34d39910",
-                color: hcCalc.state === 3 ? "#0ea5e9" : "#34d399",
+                border: `1px solid ${hcCalc.state === 3 ? `${T.accentBlue}44` : `${T.accent}44`}`,
+                background: hcCalc.state === 3 ? `${T.accentBlue}10` : `${T.accent}10`,
+                color: hcCalc.state === 3 ? T.accentBlue : T.accent,
                 fontSize: 14, fontWeight: 700, cursor: "pointer",
                 fontFamily: "'DM Sans'", letterSpacing: 0.5,
                 transition: "all 0.15s",
@@ -4826,29 +5213,29 @@ export default function SimV4() {
             {/* 킬 스위치 */}
             <div style={{
               ...S.card, marginTop: 4,
-              borderColor: hcCalc.killAlert ? "#f8717144" : "#1e1e2e",
-              background: hcCalc.killAlert ? "#f8717108" : "#08080f",
+              borderColor: hcCalc.killAlert ? `${T.danger}44` : T.border,
+              background: hcCalc.killAlert ? `${T.danger}08` : T.bgCard,
             }}>
-              <div style={{ fontSize: 10, color: hcCalc.killAlert ? "#f87171" : "#6b7280", letterSpacing: 2, marginBottom: 8, fontFamily: "'DM Sans'" }}>
+              <div style={{ fontSize: 10, color: hcCalc.killAlert ? T.danger : T.textMuted, letterSpacing: 2, marginBottom: 8, fontFamily: "'DM Sans'" }}>
                 {hcCalc.killAlert ? "🚨 킬 스위치 발동" : "안전장치"}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
-                <span style={{ color: "#94a3b8" }}>Equity: {fmt(hcCalc.equity)} USDT</span>
-                <span style={{ color: hcCalc.equityPct < 90 ? "#f87171" : "#34d399" }}>{fmt(hcCalc.equityPct, 1)}%</span>
+                <span style={{ color: T.textSub }}>Equity: {fmt(hcCalc.equity)} USDT</span>
+                <span style={{ color: hcCalc.equityPct < 90 ? T.danger : T.accent }}>{fmt(hcCalc.equityPct, 1)}%</span>
               </div>
-              <div style={{ height: 6, background: "#1e1e2e", borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ height: 6, background: T.border, borderRadius: 3, overflow: "hidden" }}>
                 <div style={{
                   height: "100%", borderRadius: 3,
                   width: `${Math.max(Math.min(hcCalc.equityPct, 100), 0)}%`,
-                  background: hcCalc.equityPct > 90 ? "#34d399" : hcCalc.equityPct > 85 ? "#f59e0b" : "#f87171",
+                  background: hcCalc.equityPct > 90 ? T.accent : hcCalc.equityPct > 85 ? T.warning : T.danger,
                   transition: "width 0.3s",
                 }} />
               </div>
-              <div style={{ fontSize: 10, color: "#4b5563", marginTop: 4 }}>
+              <div style={{ fontSize: 10, color: T.textDim, marginTop: 4 }}>
                 킬 스위치: {fmt(hcCalc.killThreshold)} USDT (-{hcKillPct}%) · 여유: {fmt(hcCalc.equity - hcCalc.killThreshold)} USDT
               </div>
               {hcCalc.killAlert && (
-                <div style={{ fontSize: 12, color: "#f87171", fontWeight: 700, marginTop: 8, textAlign: "center" }}>
+                <div style={{ fontSize: 12, color: T.danger, fontWeight: 700, marginTop: 8, textAlign: "center" }}>
                   ⚠ 모든 포지션 즉시 청산 권고
                 </div>
               )}
@@ -4857,7 +5244,7 @@ export default function SimV4() {
             {/* 원웨이 시나리오 */}
             {hcCalc.onewayScenario.length > 0 && (
               <div style={{ ...S.card, marginTop: 4 }}>
-                <div style={{ fontSize: 10, color: "#6b7280", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
+                <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" }}>
                   원웨이 시나리오 (되돌림 없이 계속 추세)
                 </div>
                 <div style={S.tblWrap}>
@@ -4870,10 +5257,10 @@ export default function SimV4() {
                     <tbody>
                       {hcCalc.onewayScenario.map((s) => (
                         <tr key={s.cycle}>
-                          <TD c="#e2e8f0">#{s.cycle}</TD>
-                          <TD c={s.loserMg < 10 ? "#f87171" : "#94a3b8"}>{fmt(s.loserMg)} USDT</TD>
-                          <TD c="#34d399">+{fmt(s.cumProfit)}</TD>
-                          <TD c="#94a3b8">{fmt(s.cumVolume, 0)}</TD>
+                          <TD c=T.textMid>#{s.cycle}</TD>
+                          <TD c={s.loserMg < 10 ? T.danger : T.textSub}>{fmt(s.loserMg)} USDT</TD>
+                          <TD c=T.accent>+{fmt(s.cumProfit)}</TD>
+                          <TD c=T.textSub>{fmt(s.cumVolume, 0)}</TD>
                         </tr>
                       ))}
                     </tbody>
@@ -4886,25 +5273,25 @@ export default function SimV4() {
             {hcCycles.length > 0 && (
               <div style={{ ...S.card, marginTop: 4 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <div style={{ fontSize: 10, color: "#6b7280", letterSpacing: 2, fontFamily: "'DM Sans'" }}>
+                  <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: 2, fontFamily: "'DM Sans'" }}>
                     사이클 기록
                   </div>
                   <button onClick={() => { if (confirm("사이클 기록을 모두 삭제할까요?")) setHcCycles([]); }}
-                    style={{ ...S.miniBtn, fontSize: 9, color: "#f87171" }}>기록 삭제</button>
+                    style={{ ...S.miniBtn, fontSize: 9, color: T.danger }}>기록 삭제</button>
                 </div>
                 {hcCycles.map((c, i) => (
                   <div key={i} style={{
                     display: "flex", justifyContent: "space-between", padding: "6px 0",
-                    borderBottom: "1px solid #0e0e18", fontSize: 12,
+                    borderBottom: `1px solid ${T.borderSub}`, fontSize: 12,
                   }}>
-                    <span style={{ color: "#6b7280" }}>#{i + 1}</span>
-                    <span style={{ color: "#34d399" }}>+{fmt(c.profit)} USDT</span>
-                    <span style={{ color: "#4b5563" }}>{c.note || ""}</span>
+                    <span style={{ color: T.textMuted }}>#{i + 1}</span>
+                    <span style={{ color: T.accent }}>+{fmt(c.profit)} USDT</span>
+                    <span style={{ color: T.textDim }}>{c.note || ""}</span>
                   </div>
                 ))}
                 <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600 }}>
-                  <span style={{ color: "#6b7280" }}>누적: </span>
-                  <span style={{ color: "#34d399" }}>+{fmt(hcCycles.reduce((a, c) => a + n(c.profit), 0))} USDT</span>
+                  <span style={{ color: T.textMuted }}>누적: </span>
+                  <span style={{ color: T.accent }}>+{fmt(hcCycles.reduce((a, c) => a + n(c.profit), 0))} USDT</span>
                 </div>
               </div>
             )}
@@ -4969,21 +5356,21 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
       <div style={S.hlGrid}>
         <HLCard label="새 평단가" value={`$${fmt(a.avg)}`}
           delta={`${fmtS(pct(a.avg - b.avg, b.avg))}%`}
-          deltaColor={(isLong && a.avg < b.avg) || (!isLong && a.avg > b.avg) ? "#34d399" : "#f87171"} />
+          deltaColor={(isLong && a.avg < b.avg) || (!isLong && a.avg > b.avg) ? T.accent : T.danger} />
 
         {hasExLiq && a.liq != null ? (
           <HLCard label="새 청산가 (추정)" value={`$${fmt(a.liq)}`}
             delta={liqWorse ? "⚠ 위험" : "✓ 안전"}
-            deltaColor={liqWorse ? "#f87171" : "#34d399"}
+            deltaColor={liqWorse ? T.danger : T.accent}
             sub={a.liqDist != null ? `현재가 대비 ${fmt(Math.abs(a.liqDist))}% 여유` : null} />
         ) : (
           <HLCard label="새 청산가" value="—"
-            delta="거래소 청산가 입력 필요" deltaColor="#6b7280" />
+            delta="거래소 청산가 입력 필요" deltaColor=T.textMuted />
         )}
 
         <HLCard label="탈출가 (수수료 포함)" value={`$${fmt(r.breakeven)}`}
           delta={`평단 대비 ${isLong ? "+" : ""}${fmt(Math.abs(r.moveNeeded), 3)}%`}
-          deltaColor="#f59e0b" wide />
+          deltaColor=T.warning wide />
       </div>
 
       {/* Before / After table */}
@@ -5000,7 +5387,7 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
             </thead>
             <tbody>
               <tr>
-                <TD c="#6b7280">Before</TD>
+                <TD c=T.textMuted>Before</TD>
                 <TD>${fmt(b.avg)}</TD>
                 <TD>{fmt(b.margin)}</TD>
                 {hasExLiq && (
@@ -5009,25 +5396,25 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
                     <TD>{b.liqDist != null ? `${fmt(Math.abs(b.liqDist))}%` : "—"}</TD>
                   </>
                 )}
-                <TD c={b.pnl >= 0 ? "#34d399" : "#f87171"}>
+                <TD c={b.pnl >= 0 ? T.accent : T.danger}>
                   {fmtS(b.pnl)} ({fmtS(b.roe)}%)
                 </TD>
               </tr>
               <tr style={{ background: "#0c0c18" }}>
-                <TD c="#e2e8f0" bold>After</TD>
-                <TD c="#0ea5e9">${fmt(a.avg)}</TD>
-                <TD c="#e2e8f0">{fmt(a.margin)}</TD>
+                <TD c=T.textMid bold>After</TD>
+                <TD c=T.accentBlue>${fmt(a.avg)}</TD>
+                <TD c=T.textMid>{fmt(a.margin)}</TD>
                 {hasExLiq && (
                   <>
-                    <TD c={liqWorse ? "#f87171" : "#34d399"}>
+                    <TD c={liqWorse ? T.danger : T.accent}>
                       {a.liq != null ? `$${fmt(a.liq)}` : "—"}
                     </TD>
-                    <TD c={liqWorse ? "#f87171" : "#34d399"}>
+                    <TD c={liqWorse ? T.danger : T.accent}>
                       {a.liqDist != null ? `${fmt(Math.abs(a.liqDist))}%` : "—"}
                     </TD>
                   </>
                 )}
-                <TD c={a.pnl >= 0 ? "#34d399" : "#f87171"} bold>
+                <TD c={a.pnl >= 0 ? T.accent : T.danger} bold>
                   {fmtS(a.pnl)} ({fmtS(a.roe)}%)
                 </TD>
               </tr>
@@ -5045,11 +5432,11 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
             <SL label="수수료 예약 (진입+청산)" value={`-${fmt(r.addTotalFeeDeduct)} USDT`} warn />
             <SL label="실제 추가 마진" value={`${fmt(r.addTotalMargin)} USDT`} />
             {r.dcaList && r.dcaList.length > 1 && (
-              <div style={{ padding: "6px 0 2px", borderBottom: "1px solid #0e0e18" }}>
+              <div style={{ padding: "6px 0 2px", borderBottom: `1px solid ${T.borderSub}` }}>
                 {r.dcaList.map((d, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#4b5563", padding: "2px 0" }}>
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: T.textDim, padding: "2px 0" }}>
                     <span>#{i + 1} ${fmt(d.price)} · {fmt(d.rawMargin, 0)}</span>
-                    <span style={{ color: "#f59e0b" }}>수수료 {fmt(d.feeDeduct)}</span>
+                    <span style={{ color: T.warning }}>수수료 {fmt(d.feeDeduct)}</span>
                   </div>
                 ))}
               </div>
@@ -5067,11 +5454,11 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
             ) : (
               <>
                 <div style={{ marginBottom: 4 }}>
-                  부족분: <span style={{ color: "#f87171", fontWeight: 600 }}>{fmt(r.shortfallInfo.shortfall)} USDT</span>
+                  부족분: <span style={{ color: T.danger, fontWeight: 600 }}>{fmt(r.shortfallInfo.shortfall)} USDT</span>
                 </div>
                 <div>
-                  <span style={{ color: "#0ea5e9", fontWeight: 600 }}>${fmt(r.shortfallInfo.price)}</span> 도달 시 물타기 가능
-                  <span style={{ color: r.shortfallInfo.changePct > 0 ? "#34d399" : "#f87171", marginLeft: 6 }}>
+                  <span style={{ color: T.accentBlue, fontWeight: 600 }}>${fmt(r.shortfallInfo.price)}</span> 도달 시 물타기 가능
+                  <span style={{ color: r.shortfallInfo.changePct > 0 ? T.accent : T.danger, marginLeft: 6 }}>
                     (현재가 대비 {fmtS(r.shortfallInfo.changePct)}%)
                   </span>
                 </div>
@@ -5091,7 +5478,7 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
       {cp > 0 && a.qty > 0 && (
         <div style={S.exitBox}>
           <div style={S.exitTitle}>탈출 시나리오</div>
-          <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: T.textDim, marginBottom: 12 }}>
             물타기 후 포지션을 청산할 때의 목표별 가격
           </div>
           <div style={S.tblWrap}>
@@ -5110,12 +5497,12 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
                   if (!ex) return null;
                   return (
                     <tr key={i} style={i === 0 ? { background: "#0c0c18" } : {}}>
-                      <TD c={i === 0 ? "#f59e0b" : "#94a3b8"}>{p.label}</TD>
-                      <TD c={i === 0 ? "#f59e0b" : "#e2e8f0"}>${fmt(ex.exitPrice)}</TD>
-                      <TD c={ex.changePct >= 0 ? "#34d399" : "#f87171"}>
+                      <TD c={i === 0 ? T.warning : T.textSub}>{p.label}</TD>
+                      <TD c={i === 0 ? T.warning : T.textMid}>${fmt(ex.exitPrice)}</TD>
+                      <TD c={ex.changePct >= 0 ? T.accent : T.danger}>
                         {fmtS(ex.changePct)}%
                       </TD>
-                      <TD c={ex.pnl >= 0 ? "#34d399" : "#94a3b8"}>
+                      <TD c={ex.pnl >= 0 ? T.accent : T.textSub}>
                         {fmtS(ex.pnl)} USDT
                       </TD>
                     </tr>
@@ -5123,12 +5510,12 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
                 })}
                 {customExit && (
                   <tr style={{ background: "#0a1020" }}>
-                    <TD c="#0ea5e9">커스텀</TD>
-                    <TD c="#0ea5e9">${fmt(customExit.exitPrice)}</TD>
-                    <TD c={customExit.changePct >= 0 ? "#34d399" : "#f87171"}>
+                    <TD c=T.accentBlue>커스텀</TD>
+                    <TD c=T.accentBlue>${fmt(customExit.exitPrice)}</TD>
+                    <TD c={customExit.changePct >= 0 ? T.accent : T.danger}>
                       {fmtS(customExit.changePct)}%
                     </TD>
-                    <TD c="#0ea5e9">
+                    <TD c=T.accentBlue>
                       {fmtS(customExit.pnl)} USDT
                     </TD>
                   </tr>
@@ -5137,14 +5524,14 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
             </table>
           </div>
           <div style={S.exitCustomRow}>
-            <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }}>목표 수익:</span>
+            <span style={{ fontSize: 11, color: T.textMuted, whiteSpace: "nowrap" }}>목표 수익:</span>
             <input type="number" value={customTarget}
               placeholder="직접 입력 (USDT)"
               onChange={(e) => setCustomTarget(e.target.value)}
               style={{ ...S.inp, fontSize: 12, padding: "7px 10px", flex: 1 }}
-              onFocus={(e) => (e.target.style.borderColor = "#0ea5e9")}
-              onBlur={(e) => (e.target.style.borderColor = "#1e1e2e")} />
-            <span style={{ fontSize: 11, color: "#4b5563" }}>USDT</span>
+              onFocus={(e) => (e.target.style.borderColor = T.accentBlue)}
+              onBlur={(e) => (e.target.style.borderColor = T.border)} />
+            <span style={{ fontSize: 11, color: T.textDim }}>USDT</span>
           </div>
         </div>
       )}
@@ -5156,11 +5543,11 @@ function ResultBlock({ r, isLong, cp, mode, hasExLiq }) {
    SUB COMPONENTS
    ═══════════════════════════════════════════ */
 function Sec({ label, accent, pyra }) {
-  const accentColor = pyra ? "#f59e0b" : "#0ea5e9";
+  const accentColor = pyra ? T.warning : T.accentBlue;
   return (
     <div style={{
       fontSize: 11, fontWeight: 700, letterSpacing: 2.5, textTransform: "uppercase",
-      color: (accent || pyra) ? accentColor : "#4b5563", fontFamily: "'DM Sans'",
+      color: (accent || pyra) ? accentColor : T.textDim, fontFamily: "'DM Sans'",
       margin: "28px 0 10px", display: "flex", alignItems: "center", gap: 8,
     }}>
       {(accent || pyra) && <div style={{ width: 3, height: 14, background: accentColor, borderRadius: 2 }} />}
@@ -5171,7 +5558,7 @@ function Sec({ label, accent, pyra }) {
 function Fld({ label, children }) {
   return (
     <div style={{ flex: 1 }}>
-      <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, fontFamily: "'DM Sans'" }}>{label}</div>
+      <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4, fontFamily: "'DM Sans'" }}>{label}</div>
       {children}
     </div>
   );
@@ -5180,8 +5567,8 @@ function Inp({ value, onChange, ph }) {
   return (
     <input type="number" value={value} placeholder={ph} onChange={(e) => onChange(e.target.value)}
       style={S.inp}
-      onFocus={(e) => (e.target.style.borderColor = "#0ea5e9")}
-      onBlur={(e) => (e.target.style.borderColor = "#1e1e2e")} />
+      onFocus={(e) => (e.target.style.borderColor = T.accentBlue)}
+      onBlur={(e) => (e.target.style.borderColor = T.border)} />
   );
 }
 
@@ -5189,7 +5576,7 @@ function Inp({ value, onChange, ph }) {
 function PriceInp({ value, onChange, ph, cp, mode, accentColor }) {
   // mode: "dca" = 물타기(평단 유리 방향), "pyra" = 불타기(추세 방향), "close" = 양방향, "entry" = 양방향
   // accentColor: 버튼 강조색 (기본 #0ea5e9)
-  const ac = accentColor || "#0ea5e9";
+  const ac = accentColor || T.accentBlue;
   const hasCp = cp > 0;
   const pctCalc = (pct) => String(Math.round(cp * (1 + pct / 100) * 100) / 100);
 
@@ -5208,7 +5595,7 @@ function PriceInp({ value, onChange, ph, cp, mode, accentColor }) {
       <input type="number" value={value} placeholder={ph} onChange={(e) => onChange(e.target.value)}
         style={S.inp}
         onFocus={(e) => (e.target.style.borderColor = ac)}
-        onBlur={(e) => (e.target.style.borderColor = "#1e1e2e")} />
+        onBlur={(e) => (e.target.style.borderColor = T.border)} />
       {hasCp && (
         <div style={{ display: "flex", gap: 2, marginTop: 3 }}>
           <button onClick={() => onChange(String(cp))} style={{ ...btnS, background: `${ac}15`, color: ac, fontWeight: 700, fontSize: 9 }}>현재가</button>
@@ -5223,7 +5610,7 @@ function PriceInp({ value, onChange, ph, cp, mode, accentColor }) {
 
 /* 마진 빠른 입력 프리셋 */
 function MarginPresets({ freeMargin, onSelect, accentColor }) {
-  const ac = accentColor || "#0ea5e9";
+  const ac = accentColor || T.accentBlue;
   if (!freeMargin || freeMargin <= 0) return null;
   const presets = [
     { label: "전액", pct: 100 },
@@ -5240,7 +5627,7 @@ function MarginPresets({ freeMargin, onSelect, accentColor }) {
           <button key={p.pct} onClick={() => onSelect(String(Math.floor(freeMargin * p.pct / 100 * 100) / 100))} style={btnS}>{p.label}</button>
         ))}
       </div>
-      <div style={{ fontSize: 8, color: "#4b5563", marginTop: 2, textAlign: "right", fontFamily: "'DM Sans'" }}>
+      <div style={{ fontSize: 8, color: T.textDim, marginTop: 2, textAlign: "right", fontFamily: "'DM Sans'" }}>
         여유: {freeMargin.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} USDT
       </div>
     </div>
@@ -5251,7 +5638,7 @@ function MarginPresets({ freeMargin, onSelect, accentColor }) {
 function SplitAutoGen({ cp, isLong, onGenerate, accentColor }) {
   const [gap, setGap] = useState("2");
   const [count, setCount] = useState("3");
-  const ac = accentColor || "#0ea5e9";
+  const ac = accentColor || T.accentBlue;
   if (!cp || cp <= 0) return null;
 
   const generate = () => {
@@ -5266,17 +5653,17 @@ function SplitAutoGen({ cp, isLong, onGenerate, accentColor }) {
 
   const inputS = { ...S.inp, fontSize: 11, padding: "5px 8px", width: "100%" };
   return (
-    <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: "#06060e", border: `1px solid ${ac}15` }}>
+    <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: T.bgSplit, border: `1px solid ${ac}15` }}>
       <div style={{ fontSize: 10, color: ac, fontWeight: 600, marginBottom: 6, fontFamily: "'DM Sans'" }}>
         자동 생성 (현재가 ${cp.toLocaleString()} 기준)
       </div>
       <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 9, color: "#4b5563", marginBottom: 2 }}>간격 (%)</div>
+          <div style={{ fontSize: 9, color: T.textDim, marginBottom: 2 }}>간격 (%)</div>
           <input type="number" value={gap} onChange={(e) => setGap(e.target.value)} style={inputS} placeholder="2" />
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 9, color: "#4b5563", marginBottom: 2 }}>개수</div>
+          <div style={{ fontSize: 9, color: T.textDim, marginBottom: 2 }}>개수</div>
           <input type="number" value={count} onChange={(e) => setCount(e.target.value)} style={inputS} placeholder="3" />
         </div>
         <button onClick={generate} style={{
@@ -5285,7 +5672,7 @@ function SplitAutoGen({ cp, isLong, onGenerate, accentColor }) {
           cursor: "pointer", fontFamily: "'DM Sans'", whiteSpace: "nowrap",
         }}>생성</button>
       </div>
-      <div style={{ fontSize: 8, color: "#4b5563", marginTop: 4, fontFamily: "'DM Sans'" }}>
+      <div style={{ fontSize: 8, color: T.textDim, marginTop: 4, fontFamily: "'DM Sans'" }}>
         {isLong ? "▼ 현재가 아래로" : "▲ 현재가 위로"} {gap}% 간격 · {count}개
       </div>
     </div>
@@ -5300,17 +5687,17 @@ function InputCalc({ pos, ep, lev, fee, onUpdate }) {
     <div style={{ marginTop: 4 }}>
       <button onClick={() => setOpen(!open)} style={{
         background: "none", border: "none", padding: 0,
-        fontSize: 10, color: open ? "#0ea5e9" : "#4b5563",
+        fontSize: 10, color: open ? T.accentBlue : T.textDim,
         cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2,
       }}>
         {open ? "▾ 투입금액 계산기 닫기" : "💰 투입금액으로 계산"}
       </button>
       {open && (
         <div style={{
-          marginTop: 4, padding: 8, background: "#06060e",
-          borderRadius: 6, border: "1px solid #1e1e2e",
+          marginTop: 4, padding: 8, background: T.bgSplit,
+          borderRadius: 6, border: `1px solid ${T.border}`,
         }}>
-          <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>
+          <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 4 }}>
             투입금액을 입력하면 수수료를 차감한 표시 마진을 자동 계산합니다
           </div>
           <Inp value={amt} onChange={(v) => {
@@ -5322,17 +5709,17 @@ function InputCalc({ pos, ep, lev, fee, onUpdate }) {
           }} ph="실제 넣은 금액 (예: 300)" />
           {ep > 0 && n(amt) > 0 && (() => {
             const conv = fromInput(n(amt), ep, lev, fee, pos.dir, pos.coin);
-            if (!conv) return <div style={{ fontSize: 10, color: "#f87171", marginTop: 4 }}>계산 불가 (값 확인)</div>;
+            if (!conv) return <div style={{ fontSize: 10, color: T.danger, marginTop: 4 }}>계산 불가 (값 확인)</div>;
             return (
-              <div style={{ marginTop: 6, fontSize: 10, color: "#4b5563", lineHeight: 1.6 }}>
+              <div style={{ marginTop: 6, fontSize: 10, color: T.textDim, lineHeight: 1.6 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span>표시 마진</span><span style={{ color: "#cbd5e1" }}>{fmt(conv.margin)} USDT</span>
+                  <span>표시 마진</span><span style={{ color: T.text }}>{fmt(conv.margin)} USDT</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span>진입 수수료</span><span style={{ color: "#f59e0b" }}>-{fmt(conv.openCost)}</span>
+                  <span>진입 수수료</span><span style={{ color: T.warning }}>-{fmt(conv.openCost)}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span>청산 수수료 예약</span><span style={{ color: "#f59e0b" }}>-{fmt(conv.closeCost)}</span>
+                  <span>청산 수수료 예약</span><span style={{ color: T.warning }}>-{fmt(conv.closeCost)}</span>
                 </div>
                 {conv.change > 0.01 && (
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -5340,17 +5727,17 @@ function InputCalc({ pos, ep, lev, fee, onUpdate }) {
                   </div>
                 )}
                 <div style={{ display: "flex", justifyContent: "space-between",
-                              marginTop: 2, borderTop: "1px solid #1e1e2e", paddingTop: 2 }}>
-                  <span>수량</span><span style={{ color: "#cbd5e1" }}>{fmt(conv.qty, 4)} {pos.coin}</span>
+                              marginTop: 2, borderTop: `1px solid ${T.border}`, paddingTop: 2 }}>
+                  <span>수량</span><span style={{ color: T.text }}>{fmt(conv.qty, 4)} {pos.coin}</span>
                 </div>
-                <div style={{ marginTop: 4, fontSize: 9, color: "#6b728088" }}>
+                <div style={{ marginTop: 4, fontSize: 9, color: `${T.textMuted}88` }}>
                   ※ 거래소 실제 수량과 소폭 차이가 있을 수 있습니다
                 </div>
               </div>
             );
           })()}
           {ep <= 0 && n(amt) > 0 && (
-            <div style={{ fontSize: 10, color: "#f59e0b", marginTop: 4 }}>
+            <div style={{ fontSize: 10, color: T.warning, marginTop: 4 }}>
               진입가를 먼저 입력하세요
             </div>
           )}
@@ -5389,7 +5776,7 @@ function HedgePanel({ pos, calc, hedgeEntry, setHedgeEntry, hedgeMargin, setHedg
     }}>
       {/* 헤더 */}
       <div style={{ fontSize: 11, color: ac, fontWeight: 700, fontFamily: "'DM Sans'", marginBottom: 12, letterSpacing: 1 }}>
-        🛡 {pos.coin} {pos.dir === "long" ? "롱" : "숏"} → <span style={{ color: pos.dir === "long" ? "#f87171" : "#34d399" }}>{hedgeDirKr}</span> 헷지
+        🛡 {pos.coin} {pos.dir === "long" ? "롱" : "숏"} → <span style={{ color: pos.dir === "long" ? T.danger : T.accent }}>{hedgeDirKr}</span> 헷지
       </div>
 
       {/* 입력 */}
@@ -5403,9 +5790,9 @@ function HedgePanel({ pos, calc, hedgeEntry, setHedgeEntry, hedgeMargin, setHedg
               position: "absolute", top: 0, right: 0,
               padding: "5px 8px", fontSize: 9, fontWeight: 700,
               borderRadius: "0 8px 0 6px",
-              border: `1px solid ${hedgeLive ? "#34d39944" : "#1e1e2e"}`,
-              background: hedgeLive ? "#34d39915" : "transparent",
-              color: hedgeLive ? "#34d399" : "#6b7280",
+              border: `1px solid ${hedgeLive ? `${T.accent}44` : T.border}`,
+              background: hedgeLive ? `${T.accent}15` : "transparent",
+              color: hedgeLive ? T.accent : T.textMuted,
               cursor: "pointer", fontFamily: "'DM Sans'", transition: "all 0.15s",
               zIndex: 1,
             }}>
@@ -5431,7 +5818,7 @@ function HedgePanel({ pos, calc, hedgeEntry, setHedgeEntry, hedgeMargin, setHedg
         const hasLiq = hr.liqBefore != null && hr.liqAfter != null;
         const liqAbsBefore = hr.liqDistBefore != null ? Math.abs(hr.liqDistBefore) : null;
         const liqAbsAfter = hr.liqDistAfter != null ? Math.abs(hr.liqDistAfter) : null;
-        const liqC = (d) => d > 50 ? "#34d399" : d > 20 ? "#f59e0b" : "#f87171";
+        const liqC = (d) => d > 50 ? T.accent : d > 20 ? T.warning : T.danger;
 
         return (
           <>
@@ -5446,23 +5833,23 @@ function HedgePanel({ pos, calc, hedgeEntry, setHedgeEntry, hedgeMargin, setHedg
             {hasLiq ? (
               <div style={{
                 padding: 14, borderRadius: 10, marginBottom: 10,
-                background: "#08080f", border: `1px solid ${hr.liqImproved ? "#34d39933" : "#f8717133"}`,
+                background: T.bgCard, border: `1px solid ${hr.liqImproved ? `${T.accent}33` : `${T.danger}33`}`,
               }}>
                 <div style={{ fontSize: 10, color: ac, letterSpacing: 2, fontWeight: 700, fontFamily: "'DM Sans'", marginBottom: 10 }}>
                   강제 청산가 변화
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 6, alignItems: "center", marginBottom: 10 }}>
                   <div style={{ textAlign: "center" }}>
-                    <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 2 }}>기존</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", fontFamily: "'DM Sans'" }}>
+                    <div style={{ fontSize: 9, color: T.textMuted, marginBottom: 2 }}>기존</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: T.warning, fontFamily: "'DM Sans'" }}>
                       ${fmt(hr.liqBefore, hr.liqBefore > 100 ? 2 : 4)}
                     </div>
                     {liqAbsBefore != null && <div style={{ fontSize: 10, color: liqC(liqAbsBefore) }}>여유 {fmt(liqAbsBefore)}%</div>}
                   </div>
-                  <div style={{ fontSize: 18, color: hr.liqImproved ? "#34d399" : "#f87171" }}>→</div>
+                  <div style={{ fontSize: 18, color: hr.liqImproved ? T.accent : T.danger }}>→</div>
                   <div style={{ textAlign: "center" }}>
-                    <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 2 }}>헷지 후</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: hr.liqImproved ? "#34d399" : "#f87171", fontFamily: "'DM Sans'" }}>
+                    <div style={{ fontSize: 9, color: T.textMuted, marginBottom: 2 }}>헷지 후</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: hr.liqImproved ? T.accent : T.danger, fontFamily: "'DM Sans'" }}>
                       ${fmt(hr.liqAfter, hr.liqAfter > 100 ? 2 : 4)}
                     </div>
                     {liqAbsAfter != null && <div style={{ fontSize: 10, color: liqC(liqAbsAfter) }}>여유 {fmt(liqAbsAfter)}%</div>}
@@ -5472,54 +5859,54 @@ function HedgePanel({ pos, calc, hedgeEntry, setHedgeEntry, hedgeMargin, setHedg
                 <div style={{ marginBottom: 6 }}>
                   {[["기존", liqAbsBefore], ["헷지", liqAbsAfter]].map(([lb, dist]) => (
                     <div key={lb} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3 }}>
-                      <span style={{ fontSize: 8, color: "#4b5563", width: 24 }}>{lb}</span>
-                      <div style={{ flex: 1, height: 4, background: "#1e1e2e", borderRadius: 2, overflow: "hidden" }}>
+                      <span style={{ fontSize: 8, color: T.textDim, width: 24 }}>{lb}</span>
+                      <div style={{ flex: 1, height: 4, background: T.border, borderRadius: 2, overflow: "hidden" }}>
                         <div style={{ height: "100%", borderRadius: 2, width: `${Math.min(dist || 0, 100)}%`, background: liqC(dist || 0), transition: "width 0.3s" }} />
                       </div>
                     </div>
                   ))}
                 </div>
-                <div style={{ fontSize: 11, fontWeight: 600, textAlign: "center", color: hr.liqImproved ? "#34d399" : "#f87171" }}>
+                <div style={{ fontSize: 11, fontWeight: 600, textAlign: "center", color: hr.liqImproved ? T.accent : T.danger }}>
                   {hr.liqImproved
                     ? `✓ 청산가 ${fmt(Math.abs(hr.liqChange))}% ${pos.dir === "long" ? "하락" : "상승"} — 안전 거리 확대`
                     : `⚠ 청산가 ${fmt(Math.abs(hr.liqChange))}% ${pos.dir === "long" ? "상승" : "하락"} — 주의`}
                 </div>
               </div>
             ) : (
-              <div style={{ fontSize: 11, color: "#4b5563", padding: "8px 0", textAlign: "center" }}>
+              <div style={{ fontSize: 11, color: T.textDim, padding: "8px 0", textAlign: "center" }}>
                 거래소 강제 청산가를 입력하면 청산가 변화를 확인할 수 있습니다
               </div>
             )}
 
             {/* 마진 변화 + 동시청산 */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-              <div style={{ padding: 12, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e" }}>
+              <div style={{ padding: 12, borderRadius: 10, background: T.bgCard, border: `1px solid ${T.border}` }}>
                 <div style={{ fontSize: 9, color: ac, fontWeight: 700, letterSpacing: 2, fontFamily: "'DM Sans'", marginBottom: 6 }}>마진 변화</div>
-                <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>사용 마진</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0", marginBottom: 6 }}>
+                <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>사용 마진</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: T.textMid, marginBottom: 6 }}>
                   {fmt(calc.totalMargin)} → <span style={{ color: ac }}>{fmt(hr.afterTotalMargin)}</span>
                 </div>
-                <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>가용 마진</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: hr.afterFreeMargin >= 0 ? "#34d399" : "#f87171" }}>
+                <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>가용 마진</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: hr.afterFreeMargin >= 0 ? T.accent : T.danger }}>
                   {fmt(calc.freeMargin)} → {fmt(hr.afterFreeMargin)}
                 </div>
-                <div style={{ fontSize: 8, color: "#4b5563", marginTop: 4 }}>
+                <div style={{ fontSize: 8, color: T.textDim, marginTop: 4 }}>
                   차이: {fmtS(hr.afterFreeMargin - calc.freeMargin)} USDT
                 </div>
               </div>
-              <div style={{ padding: 12, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e" }}>
+              <div style={{ padding: 12, borderRadius: 10, background: T.bgCard, border: `1px solid ${T.border}` }}>
                 <div style={{ fontSize: 9, color: ac, fontWeight: 700, letterSpacing: 2, fontFamily: "'DM Sans'", marginBottom: 6 }}>동시 청산 시</div>
-                <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>기존 PnL</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: hr.currentOrigPnL >= 0 ? "#34d399" : "#f87171", marginBottom: 4 }}>
+                <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>기존 PnL</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: hr.currentOrigPnL >= 0 ? T.accent : T.danger, marginBottom: 4 }}>
                   {fmtS(hr.currentOrigPnL)}
                 </div>
-                <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>헷지 PnL</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: hr.currentHedgePnL >= 0 ? "#34d399" : "#f87171", marginBottom: 4 }}>
+                <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>헷지 PnL</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: hr.currentHedgePnL >= 0 ? T.accent : T.danger, marginBottom: 4 }}>
                   {fmtS(hr.currentHedgePnL)}
                 </div>
-                <div style={{ borderTop: "1px solid #1e1e2e", paddingTop: 4 }}>
-                  <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 2 }}>순손익</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: hr.currentNet >= 0 ? "#34d399" : "#f87171" }}>
+                <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 4 }}>
+                  <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>순손익</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: hr.currentNet >= 0 ? T.accent : T.danger }}>
                     {fmtS(hr.currentNet)} USDT
                   </div>
                 </div>
@@ -5530,23 +5917,23 @@ function HedgePanel({ pos, calc, hedgeEntry, setHedgeEntry, hedgeMargin, setHedg
             {hr.breakevenAll && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
                 <div style={{ padding: 12, borderRadius: 10, background: `${ac}08`, border: `1px solid ${ac}33`, textAlign: "center" }}>
-                  <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 3 }}>본전가 (전체 수수료)</div>
+                  <div style={{ fontSize: 9, color: T.textMuted, marginBottom: 3 }}>본전가 (전체 수수료)</div>
                   <div style={{ fontSize: 16, fontWeight: 700, color: ac, fontFamily: "'DM Sans'" }}>
                     ${fmt(hr.breakevenAll, hr.breakevenAll > 100 ? 2 : 4)}
                   </div>
                   {hr.beAllDist != null && (
-                    <div style={{ fontSize: 10, color: hr.beAllDist >= 0 ? "#34d399" : "#f87171", marginTop: 2 }}>
+                    <div style={{ fontSize: 10, color: hr.beAllDist >= 0 ? T.accent : T.danger, marginTop: 2 }}>
                       현재가 대비 {fmtS(hr.beAllDist)}%
                     </div>
                   )}
                 </div>
-                <div style={{ padding: 12, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e", textAlign: "center" }}>
-                  <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 3 }}>본전가 (청산 수수료만)</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: "#94a3b8", fontFamily: "'DM Sans'" }}>
+                <div style={{ padding: 12, borderRadius: 10, background: T.bgCard, border: `1px solid ${T.border}`, textAlign: "center" }}>
+                  <div style={{ fontSize: 9, color: T.textMuted, marginBottom: 3 }}>본전가 (청산 수수료만)</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: T.textSub, fontFamily: "'DM Sans'" }}>
                     {hr.breakevenClose ? `$${fmt(hr.breakevenClose, hr.breakevenClose > 100 ? 2 : 4)}` : "—"}
                   </div>
                   {hr.breakevenClose && cp > 0 && (
-                    <div style={{ fontSize: 10, color: ((hr.breakevenClose - cp) / cp * 100) >= 0 ? "#34d399" : "#f87171", marginTop: 2 }}>
+                    <div style={{ fontSize: 10, color: ((hr.breakevenClose - cp) / cp * 100) >= 0 ? T.accent : T.danger, marginTop: 2 }}>
                       현재가 대비 {fmtS((hr.breakevenClose - cp) / cp * 100)}%
                     </div>
                   )}
@@ -5578,14 +5965,14 @@ function HedgePanel({ pos, calc, hedgeEntry, setHedgeEntry, hedgeMargin, setHedg
                   <tbody>
                     {hr.scenarios.map((s, i) => (
                       <tr key={i} style={{ background: s.isCurrent ? `${ac}08` : s.isSpecial ? `${ac}06` : "transparent" }}>
-                        <TD c={s.isCurrent ? ac : s.isSpecial ? `${ac}99` : "#94a3b8"} bold={s.isCurrent || s.isSpecial}>
+                        <TD c={s.isCurrent ? ac : s.isSpecial ? `${ac}99` : T.textSub} bold={s.isCurrent || s.isSpecial}>
                           {s.isSpecial ? s.label : `$${fmt(s.price, s.price > 100 ? 0 : 2)}`}
-                          {!s.isSpecial && <div style={{ fontSize: 8, color: "#4b5563" }}>{s.label}</div>}
+                          {!s.isSpecial && <div style={{ fontSize: 8, color: T.textDim }}>{s.label}</div>}
                         </TD>
-                        <TD c={s.origPnL >= 0 ? "#34d399" : "#f87171"}>{fmtS(s.origPnL)}</TD>
-                        <TD c={s.hedgePnL >= 0 ? "#34d399" : "#f87171"}>{fmtS(s.hedgePnL)}</TD>
-                        <TD c="#f59e0b">-{fmt(s.closeFee + hr.entryFees)}</TD>
-                        <TD c={s.net >= 0 ? "#34d399" : "#f87171"} bold>{fmtS(s.net)}</TD>
+                        <TD c={s.origPnL >= 0 ? T.accent : T.danger}>{fmtS(s.origPnL)}</TD>
+                        <TD c={s.hedgePnL >= 0 ? T.accent : T.danger}>{fmtS(s.hedgePnL)}</TD>
+                        <TD c=T.warning>-{fmt(s.closeFee + hr.entryFees)}</TD>
+                        <TD c={s.net >= 0 ? T.accent : T.danger} bold>{fmtS(s.net)}</TD>
                       </tr>
                     ))}
                   </tbody>
@@ -5601,7 +5988,7 @@ function HedgePanel({ pos, calc, hedgeEntry, setHedgeEntry, hedgeMargin, setHedg
 
 function PosCard({ pos, idx, isSel, isHedge, isPyraLocked, isPyraCounter, onSelect, onPyra, onHedge, onUpdate, onRemove, canRemove, cp, fee }) {
   const [showMoreCoins, setShowMoreCoins] = useState(false);
-  const dirC = pos.dir === "long" ? "#34d399" : "#f87171";
+  const dirC = pos.dir === "long" ? T.accent : T.danger;
   const ep = n(pos.entryPrice), mg = n(pos.margin), lev = n(pos.leverage);
   const notional = mg * lev;
   const qty = ep > 0 ? notional / ep : 0;
@@ -5611,15 +5998,15 @@ function PosCard({ pos, idx, isSel, isHedge, isPyraLocked, isPyraCounter, onSele
   const roe = pnl != null && mg > 0 ? (pnl / mg) * 100 : null;
   const isEmpty = ep === 0 && mg === 0;
 
-  const borderColor = isHedge ? "#a78bfa" : isPyraCounter ? "#f59e0b" : isPyraLocked ? "#6b728044" : isSel ? "#0ea5e9" : "#1e1e2e";
-  const bgColor = isHedge ? "#0e0a18" : isPyraCounter ? "#120e04" : isPyraLocked ? "#0a0a0e" : isSel ? "#060a14" : "#08080f";
+  const borderColor = isHedge ? "#a78bfa" : isPyraCounter ? T.warning : isPyraLocked ? `${T.textMuted}44` : isSel ? T.accentBlue : T.border;
+  const bgColor = isHedge ? "#0e0a18" : isPyraCounter ? "#120e04" : isPyraLocked ? "#0a0a0e" : isSel ? "#060a14" : T.bgCard;
 
   const isPrimary = COINS_PRIMARY.includes(pos.coin);
   const coinBtnStyle = (c) => ({
     padding: "6px 0", fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: "pointer",
-    border: `1px solid ${pos.coin === c ? "#0ea5e944" : "#1e1e2e"}`,
-    background: pos.coin === c ? "#0ea5e912" : "transparent",
-    color: pos.coin === c ? "#0ea5e9" : "#6b7280",
+    border: `1px solid ${pos.coin === c ? `${T.accentBlue}44` : T.border}`,
+    background: pos.coin === c ? `${T.accentBlue}12` : "transparent",
+    color: pos.coin === c ? T.accentBlue : T.textMuted,
     fontFamily: "'IBM Plex Mono'", transition: "all 0.15s",
     flex: 1, minWidth: 0,
   });
@@ -5628,45 +6015,45 @@ function PosCard({ pos, idx, isSel, isHedge, isPyraLocked, isPyraCounter, onSele
     <div style={{ ...S.card, borderColor, background: bgColor }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 11, color: "#4b5563" }}>#{idx + 1}</span>
+          <span style={{ fontSize: 11, color: T.textDim }}>#{idx + 1}</span>
           <span style={{
             fontSize: 11, fontWeight: 700, color: dirC, padding: "2px 8px", borderRadius: 4,
-            background: pos.dir === "long" ? "#34d39912" : "#f8717112",
+            background: pos.dir === "long" ? `${T.accent}12` : `${T.danger}12`,
             border: `1px solid ${dirC}33`,
           }}>{pos.dir === "long" ? "LONG" : "SHORT"}</span>
           {isPyraLocked && (
-            <span style={{ fontSize: 10, color: "#6b7280", fontWeight: 600 }}>🔒 물린 포지션</span>
+            <span style={{ fontSize: 10, color: T.textMuted, fontWeight: 600 }}>🔒 물린 포지션</span>
           )}
           {isPyraCounter && (
-            <span style={{ fontSize: 10, color: "#f59e0b", fontWeight: 600 }}>🔥 불타기 대상</span>
+            <span style={{ fontSize: 10, color: T.warning, fontWeight: 600 }}>🔥 불타기 대상</span>
           )}
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           <button onClick={onSelect} style={{
             ...S.miniBtn,
-            background: isSel ? "#0ea5e915" : "transparent",
-            borderColor: isSel ? "#0ea5e944" : "#1e1e2e",
-            color: isSel ? "#0ea5e9" : "#6b7280",
+            background: isSel ? `${T.accentBlue}15` : "transparent",
+            borderColor: isSel ? `${T.accentBlue}44` : T.border,
+            color: isSel ? T.accentBlue : T.textMuted,
           }}>{isSel ? "✓ 선택됨" : "물타기"}</button>
           <button onClick={onPyra} style={{
             ...S.miniBtn,
-            background: isPyraCounter ? "#f59e0b15" : "transparent",
-            borderColor: isPyraCounter ? "#f59e0b44" : "#1e1e2e",
-            color: isPyraCounter ? "#f59e0b" : "#6b7280",
+            background: isPyraCounter ? `${T.warning}15` : "transparent",
+            borderColor: isPyraCounter ? `${T.warning}44` : T.border,
+            color: isPyraCounter ? T.warning : T.textMuted,
           }}>{isPyraCounter ? "✓ 불타기" : "🔥"}</button>
           <button onClick={onHedge} style={{
             ...S.miniBtn,
             background: isHedge ? "#a78bfa15" : "transparent",
-            borderColor: isHedge ? "#a78bfa44" : "#1e1e2e",
-            color: isHedge ? "#a78bfa" : "#6b7280",
+            borderColor: isHedge ? "#a78bfa44" : T.border,
+            color: isHedge ? "#a78bfa" : T.textMuted,
           }}>{isHedge ? "✓ 헷지" : "헷지"}</button>
-          {canRemove && <button onClick={onRemove} style={{ ...S.miniBtn, color: "#f87171", borderColor: "#1e1e2e" }}>삭제</button>}
+          {canRemove && <button onClick={onRemove} style={{ ...S.miniBtn, color: T.danger, borderColor: T.border }}>삭제</button>}
         </div>
       </div>
 
       {/* 코인 선택: 버튼 그룹 */}
       <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 11, color: isEmpty ? "#94a3b8" : "#6b7280", marginBottom: 5, fontFamily: "'DM Sans'", fontWeight: isEmpty ? 600 : 400 }}>
+        <div style={{ fontSize: 11, color: isEmpty ? T.textSub : T.textMuted, marginBottom: 5, fontFamily: "'DM Sans'", fontWeight: isEmpty ? 600 : 400 }}>
           {isEmpty ? "코인 선택" : "코인"}
         </div>
         <div style={{ display: "flex", gap: 4 }}>
@@ -5680,9 +6067,9 @@ function PosCard({ pos, idx, isSel, isHedge, isPyraLocked, isPyraCounter, onSele
             style={{
               ...coinBtnStyle("__more__"),
               flex: "none", width: 40,
-              border: `1px solid ${(!isPrimary || showMoreCoins) ? "#0ea5e944" : "#1e1e2e"}`,
-              background: (!isPrimary || showMoreCoins) ? "#0ea5e912" : "transparent",
-              color: (!isPrimary || showMoreCoins) ? "#0ea5e9" : "#4b5563",
+              border: `1px solid ${(!isPrimary || showMoreCoins) ? `${T.accentBlue}44` : T.border}`,
+              background: (!isPrimary || showMoreCoins) ? `${T.accentBlue}12` : "transparent",
+              color: (!isPrimary || showMoreCoins) ? T.accentBlue : T.textDim,
               fontSize: 10,
             }}
           >
@@ -5707,9 +6094,9 @@ function PosCard({ pos, idx, isSel, isHedge, isPyraLocked, isPyraCounter, onSele
             {["long", "short"].map((d) => (
               <button key={d} onClick={() => onUpdate(pos.id, "dir", d)} style={{
                 flex: 1, padding: "8px 0", fontSize: 12, fontWeight: 600, borderRadius: 6, cursor: "pointer",
-                border: `1px solid ${pos.dir === d ? (d === "long" ? "#34d39933" : "#f8717133") : "#1e1e2e"}`,
-                background: pos.dir === d ? (d === "long" ? "#34d39910" : "#f8717110") : "transparent",
-                color: pos.dir === d ? (d === "long" ? "#34d399" : "#f87171") : "#4b5563",
+                border: `1px solid ${pos.dir === d ? (d === "long" ? `${T.accent}33` : `${T.danger}33`) : T.border}`,
+                background: pos.dir === d ? (d === "long" ? `${T.accent}10` : `${T.danger}10`) : "transparent",
+                color: pos.dir === d ? (d === "long" ? T.accent : T.danger) : T.textDim,
                 fontFamily: "'DM Sans'",
               }}>{d === "long" ? "롱" : "숏"}</button>
             ))}
@@ -5733,14 +6120,14 @@ function PosCard({ pos, idx, isSel, isHedge, isPyraLocked, isPyraCounter, onSele
       {ep > 0 && mg > 0 && (
         <div style={S.autoRow}>
           {pnl != null && (
-            <span style={{ color: pnl >= 0 ? "#34d399" : "#f87171" }}>
+            <span style={{ color: pnl >= 0 ? T.accent : T.danger }}>
               PnL: {fmtS(pnl)} ({fmtS(roe)}%)
             </span>
           )}
-          <span style={{ color: "#4b5563" }}>
+          <span style={{ color: T.textDim }}>
             포지션: {fmt(liveNotional, 0)}{cp > 0 && liveNotional !== notional ? ` (진입 시 ${fmt(notional, 0)})` : ""}
           </span>
-          {qty > 0 && <span style={{ color: "#4b5563" }}>수량: {fmt(qty, 4)}</span>}
+          {qty > 0 && <span style={{ color: T.textDim }}>수량: {fmt(qty, 4)}</span>}
         </div>
       )}
     </div>
@@ -5750,29 +6137,29 @@ function PosCard({ pos, idx, isSel, isHedge, isPyraLocked, isPyraCounter, onSele
 function SumCard({ label, value, color, sub }) {
   return (
     <div style={S.sumCard}>
-      <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 15, fontWeight: 700, color, fontFamily: "'IBM Plex Mono'" }}>{value}</div>
-      {sub && <div style={{ fontSize: 9, color: "#4b5563", marginTop: 3 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 9, color: T.textDim, marginTop: 3 }}>{sub}</div>}
     </div>
   );
 }
 function HLCard({ label, value, delta, deltaColor, sub, wide }) {
   return (
     <div style={{ ...S.hlCard, gridColumn: wide ? "1 / -1" : "auto" }}>
-      <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: wide ? 22 : 20, fontWeight: 700, color: "#f1f5f9", fontFamily: "'DM Sans'" }}>{value}</div>
+      <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: wide ? 22 : 20, fontWeight: 700, color: T.textBright2, fontFamily: "'DM Sans'" }}>{value}</div>
       {delta && <div style={{ fontSize: 12, color: deltaColor, marginTop: 4, fontWeight: 500 }}>{delta}</div>}
-      {sub && <div style={{ fontSize: 10, color: "#6b7280", marginTop: 3 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 10, color: T.textMuted, marginTop: 3 }}>{sub}</div>}
     </div>
   );
 }
 function TH({ children }) { return <th style={S.th}>{children}</th>; }
-function TD({ children, c, bold }) { return <td style={{ ...S.td, color: c || "#94a3b8", fontWeight: bold ? 600 : 400 }}>{children}</td>; }
+function TD({ children, c, bold }) { return <td style={{ ...S.td, color: c || T.textSub, fontWeight: bold ? 600 : 400 }}>{children}</td>; }
 function SL({ label, value, warn }) {
   return (
     <div style={S.sl}>
-      <span style={{ color: "#6b7280" }}>{label}</span>
-      <span style={{ color: warn ? "#f87171" : "#cbd5e1", fontWeight: 500 }}>{value}</span>
+      <span style={{ color: T.textMuted }}>{label}</span>
+      <span style={{ color: warn ? T.danger : T.text, fontWeight: 500 }}>{value}</span>
     </div>
   );
 }
@@ -5780,166 +6167,4 @@ function SL({ label, value, warn }) {
 /* ═══════════════════════════════════════════
    STYLES
    ═══════════════════════════════════════════ */
-const S = {
-  root: {
-    minHeight: "100vh", background: "#050508", color: "#cbd5e1",
-    fontFamily: "'IBM Plex Mono', monospace", padding: "20px 12px",
-  },
-  wrap: { maxWidth: 760, margin: "0 auto" },
-  hdr: { marginBottom: 28, paddingBottom: 20, borderBottom: "1px solid #111118" },
-  hdrRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 },
-  hdrDot: { width: 6, height: 6, borderRadius: "50%", background: "#34d399", boxShadow: "0 0 8px #34d39944" },
-  hdrBadge: { fontSize: 10, fontWeight: 700, letterSpacing: 2.5, color: "#34d399", fontFamily: "'DM Sans'" },
-  hdrTitle: { fontSize: 28, fontWeight: 800, color: "#f8fafc", fontFamily: "'DM Sans'", letterSpacing: -0.5 },
-  hdrSub: { fontSize: 12, color: "#4b5563", marginTop: 4, fontFamily: "'DM Sans'" },
-
-  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 },
-  grid3: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 },
-
-  inp: {
-    width: "100%", padding: "10px 12px", background: "#0a0a12", border: "1px solid #1e1e2e",
-    borderRadius: 8, color: "#e2e8f0", fontSize: 14, fontFamily: "'IBM Plex Mono'",
-    outline: "none", transition: "border-color 0.15s",
-  },
-  sel: {
-    width: "100%", padding: "10px 12px", background: "#0a0a12", border: "1px solid #1e1e2e",
-    borderRadius: 8, color: "#e2e8f0", fontSize: 13, fontFamily: "'IBM Plex Mono'",
-    outline: "none", appearance: "none", WebkitAppearance: "none",
-  },
-
-  card: {
-    padding: 16, borderRadius: 12, border: "1px solid #1e1e2e", background: "#08080f",
-    marginBottom: 10, transition: "border-color 0.2s",
-  },
-  miniBtn: {
-    padding: "4px 10px", fontSize: 11, fontWeight: 500, border: "1px solid #1e1e2e",
-    borderRadius: 6, background: "transparent", cursor: "pointer", fontFamily: "'DM Sans'",
-  },
-  autoRow: {
-    marginTop: 10, padding: "8px 10px", background: "#0a0a14", borderRadius: 6,
-    fontSize: 11, color: "#4b5563", display: "flex", gap: 16, flexWrap: "wrap",
-  },
-  addBtn: {
-    width: "100%", padding: "10px 0", border: "1px dashed #1e1e2e", borderRadius: 8,
-    background: "transparent", color: "#4b5563", cursor: "pointer", fontSize: 12,
-    fontFamily: "'DM Sans'", marginTop: 6,
-  },
-
-  summaryGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 },
-  sumCard: { padding: 12, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e" },
-
-  availBox: {
-    marginTop: 8, padding: 14, borderRadius: 10,
-    background: "#08080f", border: "1px solid #1e1e2e",
-  },
-  availRow: { display: "flex", gap: 8, alignItems: "stretch" },
-
-  shortfallBox: {
-    marginTop: 8, padding: 10, borderRadius: 6,
-    background: "#0ea5e908", border: "1px solid #0ea5e922",
-    fontSize: 12, color: "#cbd5e1", lineHeight: 1.6,
-  },
-
-  liqBar: {
-    marginTop: 10, padding: 16, borderRadius: 10,
-    background: "#08080f", border: "1px solid #1e1e2e",
-  },
-  liqBarInner: { display: "flex", justifyContent: "space-between", alignItems: "flex-end" },
-  liqVisual: { marginTop: 12 },
-  liqTrack: { height: 6, background: "#1e1e2e", borderRadius: 3, overflow: "hidden" },
-  liqFill: { height: "100%", borderRadius: 3, transition: "width 0.3s" },
-  liqEmpty: {
-    marginTop: 10, padding: 14, borderRadius: 8, background: "#08080f",
-    border: "1px dashed #1e1e2e", textAlign: "center", fontSize: 12, color: "#4b5563",
-  },
-
-  modeRow: { display: "flex", gap: 6, marginBottom: 12 },
-  modeBtn: {
-    flex: 1, padding: "10px 0", fontSize: 12, fontWeight: 600, borderRadius: 8,
-    border: "1px solid #1e1e2e", cursor: "pointer", fontFamily: "'DM Sans'",
-    background: "transparent", transition: "all 0.15s",
-  },
-  splitToggle: {
-    width: "100%", padding: "8px 0", marginTop: 6, border: "1px dashed #1e1e2e",
-    borderRadius: 8, background: "transparent", color: "#4b5563", cursor: "pointer",
-    fontSize: 11, fontFamily: "'DM Sans'", transition: "all 0.15s",
-  },
-  splitPanel: {
-    marginTop: 8, padding: 14, borderRadius: 10,
-    background: "#06060e", border: "1px solid #1e1e2e",
-  },
-  splitGrid: {
-    display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8,
-  },
-  splitCard: {
-    padding: 12, borderRadius: 8, border: "1px solid #1e1e2e", background: "#0a0a14",
-  },
-  applyBtn: {
-    padding: "4px 10px", fontSize: 10, fontWeight: 600, borderRadius: 4,
-    border: "1px solid #0ea5e933", background: "#0ea5e910", color: "#0ea5e9",
-    cursor: "pointer", fontFamily: "'DM Sans'", whiteSpace: "nowrap",
-  },
-  dcaRow: { display: "flex", gap: 8, alignItems: "center", marginBottom: 8 },
-  dcaNum: {
-    width: 24, height: 24, borderRadius: "50%", background: "#0ea5e915", border: "1px solid #0ea5e933",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: 11, color: "#0ea5e9", fontWeight: 600, flexShrink: 0,
-  },
-  rmSm: {
-    width: 32, height: 40, border: "1px solid #1e1e2e", background: "transparent",
-    color: "#f87171", borderRadius: 6, cursor: "pointer", fontSize: 16,
-    display: "flex", alignItems: "center", justifyContent: "center",
-  },
-  empty: { textAlign: "center", padding: "36px 16px", color: "#333", fontSize: 13, fontFamily: "'DM Sans'" },
-  divider: { height: 1, margin: "28px 0", background: "linear-gradient(90deg, transparent, #0ea5e922, transparent)" },
-
-  hlGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 },
-  hlCard: { padding: 16, borderRadius: 10, background: "#0a0a14", border: "1px solid #1e1e2e" },
-
-  revHL: {
-    padding: 20, borderRadius: 12, background: "#0a0a14", border: "1px solid #0ea5e944",
-    marginBottom: 12, textAlign: "center", fontFamily: "'DM Sans'",
-  },
-
-  tblWrap: { overflowX: "auto", borderRadius: 10, border: "1px solid #1e1e2e", marginBottom: 12 },
-  tbl: { width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: "'IBM Plex Mono'" },
-  th: {
-    padding: "10px 10px", textAlign: "left", color: "#4b5563", fontWeight: 500, fontSize: 10,
-    letterSpacing: 0.5, borderBottom: "1px solid #1e1e2e", background: "#08080f",
-    whiteSpace: "nowrap", fontFamily: "'DM Sans'",
-  },
-  td: { padding: "10px 10px", borderBottom: "1px solid #111118", whiteSpace: "nowrap" },
-
-  detBox: { padding: 16, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e", marginBottom: 12 },
-  detTitle: { fontSize: 10, color: "#4b5563", letterSpacing: 2, marginBottom: 10, fontFamily: "'DM Sans'" },
-  sl: { display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #0e0e18", fontSize: 12 },
-
-  warnBox: {
-    padding: 14, borderRadius: 8, background: "#f8717108", border: "1px solid #f8717122",
-    fontSize: 12, color: "#f87171", lineHeight: 1.6, marginBottom: 12,
-  },
-
-  exitBox: {
-    padding: 16, borderRadius: 10, background: "#08080f", border: "1px solid #1e1e2e",
-    marginBottom: 12,
-  },
-  exitTitle: {
-    fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase",
-    color: "#f59e0b", fontFamily: "'DM Sans'", marginBottom: 4,
-  },
-  exitCustomRow: {
-    display: "flex", alignItems: "center", gap: 8, marginTop: 10,
-  },
-
-  cdBox: {
-    padding: 16, borderRadius: 10,
-    background: "#0a0a14", border: "1px solid #0ea5e922",
-    marginBottom: 12,
-  },
-  cdTitle: {
-    fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase",
-    color: "#0ea5e9", fontFamily: "'DM Sans'", marginBottom: 4,
-  },
-
-  footer: { marginTop: 28, textAlign: "center", fontSize: 11, color: "#333", fontFamily: "'DM Sans'" },
-};
+/* S is now inside the component as useMemo - see makeStyles(T) */
