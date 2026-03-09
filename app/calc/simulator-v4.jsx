@@ -153,6 +153,8 @@ const THEMES = {
     scrollThumb: "#d1d5db",
   },
 };
+let T = THEMES.dark;
+let S = {};
 
 /* ═══════════════════════════════════════════
    MAIN COMPONENT
@@ -163,7 +165,7 @@ export default function SimV4() {
     try { const s = localStorage.getItem(STORAGE_KEY_THEME); return s === "light" ? "light" : "dark"; }
     catch { return "dark"; }
   });
-  const T = THEMES[theme];
+  T = THEMES[theme];
   const toggleTheme = useCallback(() => {
     setTheme(prev => {
       const next = prev === "dark" ? "light" : "dark";
@@ -272,7 +274,7 @@ export default function SimV4() {
   const activeColor = PROFILE_COLORS.find(c => c.id === (activeProfile?.colorId || "emerald"))?.hex || T.accent;
 
   // ── Theme-aware styles ──
-  const S = useMemo(() => ({
+  S = useMemo(() => ({
     root: {
       minHeight: "100vh", background: T.bg, color: T.text,
       fontFamily: "'IBM Plex Mono', monospace", padding: "20px 12px",
